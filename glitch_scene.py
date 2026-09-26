@@ -4,15 +4,15 @@ Akış (saniye):
   0.35 - 3.05  A N D R O E harfleri tek tek, eğik paneller arasında dönerek gelir;
                her harfte zemin değişir (beyaz / siyah / gri). Son harf ekranı doldurur.
   3.05 - 3.45  Glitch geçişi: görüntü şeritlere bölünür, kayar, beyaza patlar.
-  3.45 - 5.05  1. karakter (androe) - siyah, beyaz, gri: Pomni gibi aşağıdan fırlar,
+  3.45 - 4.28  1. karakter (androe) - siyah, beyaz, gri: Pomni gibi aşağıdan fırlar,
                havada öne eğik çırpınır (kollar değirmen gibi döner, bacaklar
                boşlukta pedal çevirir), sonra kollar yukarıda boşluğa düşer.
-  5.05 - 6.75  2. karakter (androeofficial) - siyah, beyaz, altın: Caine gibi dik
+  4.28 - 5.28  2. karakter (androeofficial) - siyah, beyaz, altın: Caine gibi dik
                ve toplu dönerek yükselir, açılıp ekranı çapraz kesen dramatik
                pozda asılı kalır, sonra düşer. Hareketler choreo.py'de.
-  6.75 - 7.15  Altın / siyah / beyaz paneller ekranı süpürür, siyaha kesilir.
-  7.15 - 10.0  Siyah zeminde beyaz "ANDROE STUDIO" glitch efektiyle kurulur,
-               üzerinden ışık geçer, sonra kararır.
+  5.28 - 5.68  Altın / siyah / beyaz paneller ekranı süpürür, siyaha kesilir.
+  5.68 - 10.0  Siyah zeminde beyaz "ANDROE STUDIO" glitch efektiyle kurulur, kamera
+               çok yavaş yaklaşır, üzerinden iki kez ışık geçer, sonra kararır.
 
 Sağ altta "Inspired by Glitch Productions" yazar; rengi her pikselde altındaki
 zeminin tersidir (koyu zeminde beyaz, açık zeminde siyah).
@@ -50,10 +50,11 @@ LETTERS = "ANDROE"
 T_LETTERS = 0.35
 BEAT = 0.45
 T_GLITCH = (3.05, 3.45)
-T_CHAR1 = (3.45, 5.05)
-T_CHAR2 = (5.05, 6.75)
-T_SWEEP = (6.75, 7.15)
-T_LOGO = 7.15
+# karakter bölümleri referanstaki gerçek süreye göre (Pomni ~0.7 s, Caine ~0.85 s görünür)
+T_CHAR1 = (3.45, 4.28)
+T_CHAR2 = (4.28, 5.28)
+T_SWEEP = (5.28, 5.68)
+T_LOGO = 5.68
 T_OUT = (9.55, 9.95)
 
 # Harf sahneleri: (zemin, harf, gölge kopyaları)
@@ -250,16 +251,16 @@ class GlitchScene:
                 c.restore()
 
     def _camera(self, t, t0, t1):
-        """Yavaşça yaklaşan kamera; 1. karakter havada daha yüksekte durduğu için kadraj yukarıda."""
+        """Çok hafif yaklaşan kamera; 1. karakter havada daha yüksekte durduğu için kadraj yukarıda."""
         u = span(t, t0, t1)
         ty = 3.9 if t0 == T_CHAR1[0] else 2.6
         # referanstaki gibi hafif yukarıdan bakar: öne eğilen gövde kameraya uzanıyormuş gibi görünür
-        return look_at((0.3 * u, ty + 3.4, -14.5 + 1.2 * u), (0.3, ty, 0))
+        return look_at((0.15 * u, ty + 3.4, -14.5 + 0.4 * u), (0.15 * u, ty, 0))
 
     def _char_image(self, character, state, view):
         """Karakteri çizer ve yalnızca kapladığı alanı döndürür: (görüntü, x, y)."""
-        pose, rot, pos = state
-        rgba = self.renderer.render(character, pose, rot, pos, view, fov=34)
+        pose, rot, pos, squash = state
+        rgba = self.renderer.render(character, pose, rot, pos, view, fov=34, squash=squash)
         ys, xs = np.nonzero(rgba[..., 3] > 0)
         if len(xs) == 0:
             return None, 0, 0
@@ -390,11 +391,14 @@ class GlitchScene:
                 c.drawPath(p, skia.Paint(AntiAlias=True, Color4f=col(GREY)))
             c.restore()
         # Işık süzmesi
-        u = span(t, T_LOGO + 1.0, T_LOGO + 1.6)
+        for s0, strength in ((T_LOGO + 1.0, 0.7), (T_LOGO + 2.6, 0.45)):
+            self._logo_shine(c, span(t, s0, s0 + 0.6), strength)
+
+    def _logo_shine(self, c, u, strength):
         if 0 < u < 1:
             l, top, r, bottom = self.logo_box
             box = skia.Rect(l - 120, top - 120, r + 120, bottom + 120)
-            c.saveLayer(box, skia.Paint(BlendMode=skia.BlendMode.kPlus, Alphaf=0.7 * math.sin(math.pi * u),
+            c.saveLayer(box, skia.Paint(BlendMode=skia.BlendMode.kPlus, Alphaf=strength * math.sin(math.pi * u),
                                         ImageFilter=skia.ImageFilters.Blur(10, 10)))
             for p, _ in self.logo:
                 c.drawPath(p, skia.Paint(AntiAlias=True, Color4f=col(PURE)))
@@ -426,6 +430,11 @@ class GlitchScene:
         elif t < T_SWEEP[1]:
             self._draw_sweep(c, t)
         else:
+            # logo süresince çok yavaş yaklaşan kamera (logo durağan kalmasın)
+            z = 1 + 0.045 * ease_in_out(span(t, T_LOGO, T_OUT[1]))
+            c.translate(CX, CY)
+            c.scale(z, z)
+            c.translate(-CX, -CY)
             self._draw_logo(c, t)
         c.restore()
 

@@ -157,6 +157,12 @@ class Renderer:
         self.prog = self.ctx.program(vertex_shader=_VERT, fragment_shader=_FRAG)
         self.cache = {}
 
+    @staticmethod
+    def _split(value):
+        if isinstance(value, tuple):
+            return value[0], np.asarray(value[1], float)
+        return value, np.zeros(3)
+
     def _upload(self, character):
         if id(character) in self.cache:
             return self.cache[id(character)]
@@ -172,11 +178,14 @@ class Renderer:
         self.cache[id(character)] = (tex, parts)
         return tex, parts
 
-    def render(self, character, pose, root_rot, root_pos, view, fov=30.0, rim=0.35):
+    def render(self, character, pose, root_rot, root_pos, view, fov=30.0, rim=0.35, squash=None):
         """Tek karakteri çizer; (h, w, 4) uint8 RGBA döndürür.
 
-        pose: {parça: 3x3 dönüş}, root_rot/root_pos: karakterin dünyadaki duruşu,
-        view: 4x4 kamera matrisi.
+        pose: {parça: 3x3 dönüş} ya da {parça: (3x3 dönüş, kaydırma)}. Kaydırma
+        gövde uzayında stud cinsindendir: Roblox'ta Motor6D'nin konumunu key'lemek
+        gibi, kol omuzdan ayrılabilir / gövdeye girebilir, bacak gövdeye çekilebilir.
+        root_rot/root_pos: karakterin dünyadaki duruşu; squash: gövde merkezinden
+        (sx, sy, sz) ölçek (squash & stretch). view: 4x4 kamera matrisi.
         """
         tex, parts = self._upload(character)
         aspect = self.w / self.h
@@ -195,25 +204,30 @@ class Renderer:
         rim_dir = np.array([0.6, 0.3, -0.7])
         self.prog["rim_dir"].value = tuple(rim_dir / np.linalg.norm(rim_dir))
         self.prog["rim"].value = rim
+        S = np.diag(squash) if squash is not None else np.eye(3)
+        S_inv = np.linalg.inv(S)
+        center = (character.pivots["torso"] + character.pivots["head"]) / 2
+        tr, tr_off = self._split(pose.get("torso", np.eye(3)))
+        t = character.pivots["torso"]
         for part, vao in parts.items():
-            local = pose.get(part, np.eye(3))
+            local, off = self._split(pose.get(part, np.eye(3)))
             if part != "torso" and part in character.pivots:
                 # parça kendi ekleminden döner, sonra gövdenin dönüşünü izler
-                tr = pose.get("torso", np.eye(3))
                 p = character.pivots[part]
-                t = character.pivots["torso"]
                 m3 = tr @ local
-                offset = tr @ (p - t) + t - m3 @ p
+                offset = tr @ (p - t) + t - m3 @ p + tr @ off + tr_off
             else:
-                t = character.pivots["torso"]
                 m3 = local
-                offset = t - m3 @ t
+                offset = t - m3 @ t + off
+            # squash & stretch: gövde merkezinden ölçek
+            m3s = S @ m3
+            offset = S @ (offset - center) + center
             model = np.eye(4)
-            model[:3, :3] = root_rot @ m3
+            model[:3, :3] = root_rot @ m3s
             model[:3, 3] = root_rot @ offset + root_pos
             mvp = proj @ view @ model
             self.prog["mvp"].write(mvp.T.astype("f4").tobytes())
-            self.prog["nmat"].write((root_rot @ m3).T.astype("f4").tobytes())
+            self.prog["nmat"].write((root_rot @ S_inv @ m3).T.astype("f4").tobytes())
             vao.render(moderngl.TRIANGLES)
         self.ctx.copy_framebuffer(self.resolve, self.fbo)
         data = np.frombuffer(self.resolve.read(components=4, alignment=1), np.uint8)
