@@ -161,7 +161,20 @@ def bell(mx, t0, f0, gain, rng):
     mx.add(peak(tone) * (1 - np.exp(-t / 0.003)), t0, gain=gain, reverb=0.5)
 
 
-def swoosh(mx, t0, t1, x0, x1, rng):
+def charge(mx, t0, t1, rng):
+    """İkon ışığı içine çekerken: yükselen, sonunda kesilen parlak hışırtı ve ton."""
+    dur = t1 - t0
+    t = span(dur)
+    u = t / dur
+    env = u**2 * np.clip((dur - t) / 0.01, 0, 1)
+    air = np.stack([sweep_band(rng.standard_normal(len(t)), 800 * 10 ** u, 2.0) for _ in range(2)], -1)
+    mx.add(air / np.abs(air).max() * env[:, None], t0, gain=0.16, reverb=0.3)
+    ph = glide(220 * 4 ** u)
+    tone = (np.sin(ph) + 0.3 * np.sin(2 * ph)) * env
+    mx.add(peak(tone), t0, gain=0.07, reverb=0.3)
+
+
+def swoosh(mx, t0, t1, x0, x1, rng, gain=0.3):
     """İkon kayarken: hızına göre parlaklaşan, ikonla birlikte stereo alanda gezen hava sesi."""
     dur = t1 - t0
     t = span(dur + 0.1)
@@ -173,7 +186,7 @@ def swoosh(mx, t0, t1, x0, x1, rng):
     env = speed**1.3
     for ch, sig in enumerate(air):
         sig = sig / np.abs(sig).max() * env
-        mx.add(sig, t0, gain=0.3, pan=np.clip(pan + (0.25 if ch else -0.25), -1, 1), reverb=0.2)
+        mx.add(sig, t0, gain=gain, pan=np.clip(pan + (0.25 if ch else -0.25), -1, 1), reverb=0.2)
 
 
 def stop_thump(mx, t0, x, gain):
@@ -259,10 +272,14 @@ def synthesize(events, seed=5):
         swoosh(mx, a, b, x0, x1, rng)
         if k < len(events["moves"]) - 1:
             stop_thump(mx, b, x1, gain=0.35)
+    stop_thump(mx, events["moves"][-1][1], events["moves"][-1][3], gain=0.35)
     letter_notes(mx, events["letters"])
+    charge(mx, events["exit"][0], events["final"] - 0.01, rng)
+    for side in (0.2, 0.8):                     # kelimeler iki yandan ortaya süzülür
+        swoosh(mx, *events["glide"], side, 0.5, rng, gain=0.12)
     resolve(mx, events["final"], rng)
     pad(mx, events["final"] - 0.03, out[0] + 0.05, out[1] + 0.08, rng)
-    glint(mx, (events["glint"][0] + events["glint"][1]) / 2)
+    glint(mx, events["glint"][0] + 0.15)       # ışık dalgası yazıya değdiği an
 
     mix = mx.dry + 0.4 * convolve(mx.send, reverb_ir(rng))
 

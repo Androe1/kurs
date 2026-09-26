@@ -3,12 +3,15 @@
 Akış (saniye):
   0.12  Simsiyah ekranın derinliklerinden beyaz, 3B eğik kare ikon dönerek gelir.
   0.72  İkon yerine oturur: parlama, eğik kare şok dalgası, küçük parçacıklar.
-  0.90  İkon küçülüp yuvarlanarak sağa gider; arkasından ANDROE çıkar.
-  1.72  İkon sola döner: ANDROE'yi yutar, arkasından STUDIO çıkar.
-  2.56  İkon yeniden sağa gider: STUDIO'yu iter, solundan ANDROE çıkar
-        ve logo "ANDROE [ikon] STUDIO" olarak oturur.
-  3.30  Logonun üzerinden bir ışık geçer.
-  4.35  Her şey yumuşakça kararır; 5.0'da ekran tamamen siyahtır.
+  0.85  İkon küçülüp yuvarlanarak sağa gider; arkasından ANDROE çıkar.
+  1.58  İkon sola döner: ANDROE'yi yutar, arkasından STUDIO çıkar.
+  2.33  İkon yeniden sağa gider: STUDIO'yu iter, solundan ANDROE çıkar.
+  2.92  İkon çevresindeki ışığı içine çeker (yazılar gümüşe söner), kenarı
+        bize dönecek şekilde döner, ince bir ışık çizgisine dönüşür ve tek
+        bir ışık noktasına çöker. Kelimeler süzülerek birleşir.
+  3.28  Işık noktasından iki yana yayılan ışık dalgaları geçtikleri yeri
+        bembeyaz yapar: ekranda yalnızca "ANDROE STUDIO" kalır.
+  4.40  Her şey yumuşakça kararır; 5.0'da ekran tamamen siyahtır.
 
 Yazılar ikonun "arkasından" çıkar: bir kelime yalnızca ikonun sol (ya da
 sağ) kenarının dışında görünür, bu yüzden ikon hareket ettikçe kelimeler
@@ -33,9 +36,11 @@ FOCAL = 1500.0          # z=0 düzlemindeki nesneler birebir ölçekte görünü
 # Zaman çizelgesi (saniye)
 DURATION = 5.0
 T_IN = (0.12, 0.72)                                      # ikon dönerek gelir, T_IN[1]'de oturur
-T_MOVES = ((0.90, 1.42), (1.72, 2.28), (2.56, 3.10))     # sağa, sola, yeniden sağa
-T_GLINT = (3.30, 3.80)
-T_OUT = (4.35, 4.92)
+T_MOVES = ((0.85, 1.33), (1.58, 2.08), (2.33, 2.83))     # sağa, sola, yeniden sağa
+T_EXIT = (2.92, 3.28)      # ikon ışığı toplar, kenarı bize döner ve bir noktaya çöker
+T_GLIDE = (2.98, 3.52)     # kelimeler süzülerek birleşir
+T_SHINE = (3.28, 3.95)     # ışık noktasından iki yana yayılan dalgalar yazıyı beyazlatır
+T_OUT = (4.40, 4.92)
 
 # İkon: eğik kare, ortasında kare delik; beyaz ve kalınlıklı (3B)
 ICON_TILT = math.radians(15)
@@ -51,6 +56,8 @@ MASK = 0.3              # yazı, ikon merkezinden (kenar x MASK) uzakta görünm
 # Tipografi
 FONT_SIZE, TRACK = 120.0, 0.04
 GAP = 46.0              # ikon ile kelimeler arası boşluk
+WORD_SPACE = 0.32       # son hâlde ANDROE ile STUDIO arası (em)
+DIM = 0.6               # ikon ışığı çekerken yazıların sönük (gümüş) parlaklığı
 
 SHUTTER = 0.5           # hareket bulanıklığı: kare süresinin yarısı (180 derece)
 BLOOM = ((14.0, 0.20), (46.0, 0.10))  # (bulanıklık, miktar) çiftleri
@@ -231,7 +238,11 @@ class Scene:
         self.a1_back = max(x2 - r_small - a1, 0) + 6     # 2. harekette ikonun içine çekilir
         self.s2 = (s2, min(x1 + r_small - (s2 + ws) - 6, -40))
         self.a3 = (a3, max(x2 - r_small - a3, 0) + 6)
-        self.final_box = (a3, x3 + (s2 - x2) + ws)
+        s3 = s2 + (x3 - x2)
+        final_left = CX - (wa + WORD_SPACE * FONT_SIZE + ws) / 2
+        self.glide = (final_left - a3, final_left + wa + WORD_SPACE * FONT_SIZE - s3)
+        self.final_box = (final_left, final_left + wa + WORD_SPACE * FONT_SIZE + ws)
+        self.spark_x = final_left + wa + WORD_SPACE * FONT_SIZE / 2   # iki kelimenin tam ortası
 
     def _build_particles(self, rng):
         """İkon yerine otururken kenarlarından saçılan küçük eğik kareler."""
@@ -274,26 +285,36 @@ class Scene:
         yaw -= 4 * math.pi * (1 - e)
         pitch += 0.6 * (1 - e)
         size *= 1 + 0.08 * pulse(t - T_IN[1], 0.05)
+
+        # Çıkış: kenarı bize dönecek şekilde döner, incelir ve kelimelerin ortasına kayar
+        e = progress(t, T_EXIT, lambda u: u ** 2.2)
+        yaw += (math.pi / 2 - REST_YAW) * e
+        pitch *= 1 - e
+        size *= 1 - 0.25 * e
+        x += (self.spark_x - self.stops[3]) * progress(t, T_EXIT)
         rot = rot_y(yaw) @ rot_x(pitch) @ rot_z(ICON_TILT + roll)
         return x, CY, z, size, rot
 
     def _icon_glow(self, t):
         """Oturma ve son duruş anlarında ikonun kısa parlaması."""
-        return max(pulse(t - T_IN[1], 0.06), 0.8 * pulse(t - T_MOVES[2][1], 0.06))
+        charge = progress(t, T_EXIT, lambda u: u ** 1.5)       # çıkarken ışığı toplar
+        return max(pulse(t - T_IN[1], 0.06), 0.8 * pulse(t - T_MOVES[2][1], 0.06), charge)
 
     def word_states(self, t):
         """Görünen kelimeler: (kelime, sol kenar x, taraf); taraf -1 ikonun solu, +1 sağı."""
         e1, e2, e3 = (progress(t, span) for span in T_MOVES)
+        g = progress(t, T_GLIDE)
         states = []
         if T_MOVES[0][0] < t < T_MOVES[1][1]:
             left, shift = self.a1
             states.append((self.androe, left + shift * (1 - e1) + self.a1_back * e2, -1))
         if t > T_MOVES[1][0]:
             left, shift = self.s2
-            states.append((self.studio, left + shift * (1 - e2) + (self.stops[3] - self.stops[2]) * e3, 1))
+            states.append((self.studio, left + shift * (1 - e2) + (self.stops[3] - self.stops[2]) * e3
+                           + self.glide[1] * g, 1))
         if t > T_MOVES[2][0]:
             left, shift = self.a3
-            states.append((self.androe, left + shift * (1 - e3), -1))
+            states.append((self.androe, left + shift * (1 - e3) + self.glide[0] * g, -1))
         return states
 
     # ------------------------------------------------------------ çizim
@@ -339,17 +360,55 @@ class Scene:
             c.drawPath(path_of(*[k.tolist() for k in contours]), paint)
 
     def _draw_words(self, c, t, x, size):
-        r = MASK * size
-        paint = skia.Paint(AntiAlias=True, Color4f=WHITE)
-        for word, left, side in self.word_states(t):
+        if t < T_EXIT[0]:                        # yazılar ikonun kenarlarından çıkar
+            r = MASK * size
+            paint = skia.Paint(AntiAlias=True, Color4f=WHITE)
+            for word, left, side in self.word_states(t):
+                c.save()
+                if side < 0:
+                    c.clipRect(skia.Rect(-W, -H, x - r, 2 * H), skia.ClipOp.kIntersect, True)
+                else:
+                    c.clipRect(skia.Rect(x + r, -H, 2 * W, 2 * H), skia.ClipOp.kIntersect, True)
+                c.translate(left, self.baseline)
+                c.drawPath(word.path, paint)
+                c.restore()
+            return
+
+        # İkon ışığı çekerken yazılar gümüşe söner (üstten alta hafif metalik geçiş)
+        level = DIM + (1 - DIM) * (1 - progress(t, T_EXIT, ease_in_out_sine))
+        top, bottom = self.baseline - FONT_SIZE * 0.73, self.baseline
+        silver = skia.GradientShader.MakeLinear(
+            [skia.Point(0, top), skia.Point(0, bottom)],
+            [grey(min(level * 1.12, 1)).toColor(), grey(level * 0.86).toColor()])
+        self._paint_words(c, t, skia.Paint(AntiAlias=True, Shader=silver))
+
+        # Işık dalgaları ortadan iki yana yayılır; geçtikleri yer bembeyaz olur
+        front = self._shine_front(t)
+        if front > 0:
+            left, right = self.final_box
+            box = skia.Rect(left - 60, top - 60, right + 60, bottom + 60)
+            c.saveLayer(box, None)
+            self._paint_words(c, t, skia.Paint(AntiAlias=True, Color4f=WHITE))
+            cx, soft = self.spark_x, 70.0
+            span = max(front, 1.0) + soft
+            shader = skia.GradientShader.MakeLinear(
+                [skia.Point(cx - span, 0), skia.Point(cx + span, 0)],
+                [grey(1, 0).toColor(), grey(1, 1).toColor(), grey(1, 1).toColor(), grey(1, 0).toColor()],
+                [0.0, soft / (2 * span), 1 - soft / (2 * span), 1.0])
+            c.drawRect(box, skia.Paint(Shader=shader, BlendMode=skia.BlendMode.kDstIn))
+            c.restore()
+
+    def _paint_words(self, c, t, paint):
+        for word, left, _ in self.word_states(t):
             c.save()
-            if side < 0:
-                c.clipRect(skia.Rect(-W, -H, x - r, 2 * H), skia.ClipOp.kIntersect, True)
-            else:
-                c.clipRect(skia.Rect(x + r, -H, 2 * W, 2 * H), skia.ClipOp.kIntersect, True)
             c.translate(left, self.baseline)
             c.drawPath(word.path, paint)
             c.restore()
+
+    def _shine_front(self, t):
+        """Işık dalgasının kelimelerin ortasından uzaklığı (px)."""
+        reach = max(self.spark_x - self.final_box[0], self.final_box[1] - self.spark_x) + 80
+        return reach * progress(t, T_SHINE, ease_out_cubic)
 
     def _draw_landing(self, c, t):
         dt = t - T_IN[1]
@@ -389,42 +448,63 @@ class Scene:
             c.drawRect(skia.Rect(-h, -h, h, h), paint)
             c.restore()
 
-    def _draw_final_ring(self, c, t, x):
-        """Logo son yerine oturduğunda ikondan çıkan küçük halka."""
-        u = (t - T_MOVES[2][1]) / 0.4
-        if 0 <= u <= 1:
-            half = ICON_SMALL * (0.6 + 0.45 * ease_out_cubic(u))
-            c.save()
-            c.translate(x, CY)
-            c.rotate(math.degrees(ICON_TILT))
-            c.drawRect(skia.Rect(-half, -half, half, half),
-                       skia.Paint(AntiAlias=True, Style=skia.Paint.kStroke_Style,
-                                  StrokeWidth=3.5 * (1 - u) + 0.5, Color4f=grey(1, 0.55 * (1 - u) ** 2)))
-            c.restore()
+    def _draw_collapse(self, c, t, pose):
+        """İkon kenarı bize dönünce ince bir ışık çizgisi olur, sonra parlayan bir noktaya çöker."""
+        x, size = pose[0], pose[3]
+        u_in = clamp01((t - T_EXIT[0]) / (T_EXIT[1] - T_EXIT[0]))
+        d = t - T_EXIT[1]
+        if u_in < 0.55 or d > 0.7:
+            return
+        if d < 0:                                    # ışık çizgisi belirir
+            height = size * 1.05
+            alpha = (u_in - 0.55) / 0.45
+        else:                                        # çizgi noktaya çöker
+            height = size * 1.05 * (1 - ease_out_cubic(clamp01(d / 0.14)))
+            alpha = 1.0
+        if height > 1:
+            line = skia.GradientShader.MakeLinear(
+                [skia.Point(x, CY - height / 2), skia.Point(x, CY + height / 2)],
+                [grey(1, 0).toColor(), grey(1, alpha).toColor(), grey(1, 0).toColor()])
+            for w, blur in ((3.0, 0), (16.0, 10)):
+                paint = skia.Paint(AntiAlias=True, Shader=line, BlendMode=skia.BlendMode.kPlus)
+                if blur:
+                    paint.setImageFilter(skia.ImageFilters.Blur(blur, blur))
+                c.drawRect(skia.Rect(x - w / 2, CY - height / 2, x + w / 2, CY + height / 2), paint)
+        if d >= 0:                                   # parlayan nokta: dört kollu ışık yıldızı
+            glow = pulse(d, 0.06)
+            for length, width, a in ((240, 2.5, 0.9), (90, 2.0, 0.7)):
+                horizontal = length * (0.4 + 0.6 * ease_out_cubic(clamp01(d / 0.2)))
+                vertical = horizontal * 0.45
+                for (dx, dy) in ((horizontal, 0), (0, vertical)):
+                    ray = skia.GradientShader.MakeLinear(
+                        [skia.Point(x - dx - 1e-3, CY - dy - 1e-3), skia.Point(x + dx + 1e-3, CY + dy + 1e-3)],
+                        [grey(1, 0).toColor(), grey(1, a * glow).toColor(), grey(1, 0).toColor()])
+                    c.drawRect(skia.Rect(x - max(dx, width), CY - max(dy, width), x + max(dx, width), CY + max(dy, width)),
+                               skia.Paint(AntiAlias=True, Shader=ray, BlendMode=skia.BlendMode.kPlus))
+            core = skia.GradientShader.MakeRadial(skia.Point(x, CY), 70,
+                                                  [grey(1, glow).toColor(), grey(1, 0).toColor()])
+            c.drawCircle(x, CY, 70, skia.Paint(Shader=core, BlendMode=skia.BlendMode.kPlus))
 
-    def _draw_glint(self, c, t, pose):
-        """Logonun üzerinden soldan sağa geçen ışık (yazıya ve ikona yapışık parıltı)."""
-        u = clamp01((t - T_GLINT[0]) / (T_GLINT[1] - T_GLINT[0]))
+    def _draw_shine(self, c, t):
+        """İki yana yayılan ışık dalgalarının yazıya yapışık parıltısı."""
+        u = clamp01((t - T_SHINE[0]) / (T_SHINE[1] - T_SHINE[0]))
         if not 0 < u < 1:
             return
+        front = self._shine_front(t)
         left, right = self.final_box
-        center = left - 120 + (right - left + 240) * ease_in_out_sine(u)
         box = skia.Rect(left - 150, CY - 200, right + 150, CY + 200)
-        c.saveLayer(box, skia.Paint(BlendMode=skia.BlendMode.kPlus, Alphaf=0.6 * math.sin(math.pi * u),
-                                    ImageFilter=skia.ImageFilters.Blur(10, 10)))
-        white = skia.Paint(AntiAlias=True, Color4f=WHITE)
-        for word, x, _ in self.word_states(t):
-            c.save()
-            c.translate(x, self.baseline)
-            c.drawPath(word.path, white)
-            c.restore()
-        for _, contours, _, _ in self._icon_polygons(pose):
-            c.drawPath(path_of(*[k.tolist() for k in contours]), white)
-        n = np.array([math.cos(math.radians(20)), math.sin(math.radians(20))])  # eğik bant
-        mid = np.array([center, CY])
+        c.saveLayer(box, skia.Paint(BlendMode=skia.BlendMode.kPlus, Alphaf=0.85 * (1 - u) ** 0.7,
+                                    ImageFilter=skia.ImageFilters.Blur(9, 9)))
+        self._paint_words(c, t, skia.Paint(AntiAlias=True, Color4f=WHITE))
+        cx, w = self.spark_x, 60.0
+        a, b = cx - front - w, cx + front + w
+        if b - a > 4 * w:
+            stops = [0.0, w / (b - a), 2 * w / (b - a), 1 - 2 * w / (b - a), 1 - w / (b - a), 1.0]
+            colors = [0, 1, 0, 0, 1, 0]
+        else:
+            stops, colors = [0.0, 0.5, 1.0], [0, 1, 0]
         shader = skia.GradientShader.MakeLinear(
-            [skia.Point(*(mid - 75 * n)), skia.Point(*(mid + 75 * n))],
-            [grey(1, 0).toColor(), grey(1, 1).toColor(), grey(1, 0).toColor()])
+            [skia.Point(a, 0), skia.Point(b, 0)], [grey(1, v).toColor() for v in colors], stops)
         c.drawRect(box, skia.Paint(Shader=shader, BlendMode=skia.BlendMode.kDstIn))
         c.restore()
 
@@ -455,10 +535,11 @@ class Scene:
             c.saveLayer(None, paint)
 
         pose = self.icon_pose(t)
-        self._draw_final_ring(c, t, pose[0])
         self._draw_words(c, t, pose[0], pose[3])
-        self._draw_icon(c, t, pose)
-        self._draw_glint(c, t, pose)
+        if t < T_EXIT[1]:
+            self._draw_icon(c, t, pose)
+        self._draw_collapse(c, t, pose)
+        self._draw_shine(c, t)
         self._draw_landing(c, t)
 
         if fade > 0:
@@ -469,7 +550,7 @@ class Scene:
 
     def samples(self, t):
         """Hareket bulanıklığı için bir karede kaç alt kare çizileceği."""
-        if T_IN[0] - 0.05 < t < T_MOVES[2][1] + 0.3:
+        if T_IN[0] - 0.05 < t < T_SHINE[1] + 0.1:
             return 8
         if T_OUT[0] < t < T_OUT[1]:
             return 2
@@ -548,5 +629,6 @@ class Scene:
         return dict(duration=DURATION, spin_in=T_IN, spin=(spin_t.tolist(), spin),
                     land=T_IN[1], moves=[(a, b, self.stops[k] / W, self.stops[k + 1] / W)
                                          for k, (a, b) in enumerate(T_MOVES)],
-                    letters=letters, final=T_MOVES[2][1], glint=T_GLINT, out=T_OUT)
+                    letters=letters, exit=T_EXIT, final=T_EXIT[1], glide=T_GLIDE,
+                    glint=T_SHINE, out=T_OUT)
 

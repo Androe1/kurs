@@ -9,15 +9,15 @@ Hazır video: [`output/androe_studio_intro.mp4`](output/androe_studio_intro.mp4)
 
 ## Akış
 
-| Saniye      | Görüntü                                                             | Ses                                  |
-|-------------|---------------------------------------------------------------------|--------------------------------------|
-| 0.1 - 0.7   | Beyaz, 3B eğik kare ikon derinlikten dönerek gelir                  | yaklaştıkça yükselen "vuuum"         |
-| 0.7         | İkon ekranın ortasına oturur                                        | derin vuruş, çatırtı, parlak çan     |
-| 0.9 - 1.4   | İkon küçülüp yuvarlanarak sağa gider, arkasından ANDROE çıkar       | whoosh + her harfe yükselen bir nota |
-| 1.7 - 2.3   | İkon sola döner: ANDROE'yi yutar, arkasından STUDIO çıkar           | whoosh + alçalan notalar             |
-| 2.6 - 3.1   | İkon yeniden sağa gider, STUDIO'yu iter, solundan ANDROE çıkar      | whoosh + notalar                     |
-| 3.1 - 4.3   | Logo "ANDROE [ikon] STUDIO" olarak oturur, üzerinden ışık geçer     | çan, ışıltı, sıcak akor              |
-| 4.3 - 4.9   | Logo yumuşakça kararır, video siyah biter                           | ses söner                            |
+| Saniye      | Görüntü                                                                  | Ses                                  |
+|-------------|--------------------------------------------------------------------------|--------------------------------------|
+| 0.1 - 0.7   | Beyaz, 3B eğik kare ikon derinlikten dönerek gelir ve ortaya oturur      | yaklaştıkça yükselen "vuuum", vuruş  |
+| 0.85 - 1.3  | İkon sağa yuvarlanır, arkasından ANDROE çıkar                            | whoosh + her harfe yükselen nota     |
+| 1.6 - 2.1   | İkon sola döner: ANDROE'yi yutar, arkasından STUDIO çıkar                | whoosh + alçalan notalar             |
+| 2.3 - 2.8   | İkon yeniden sağa gider, STUDIO'yu iter, solundan ANDROE çıkar           | whoosh + notalar                     |
+| 2.9 - 3.3   | İkon ışığı içine çeker (yazılar gümüşe söner), ince bir ışık çizgisine dönüşüp bir noktaya çöker; kelimeler süzülerek birleşir | yükselen gerilim, iki yandan whoosh |
+| 3.3 - 3.95  | Işık noktasından iki yana yayılan dalgalar yazıyı bembeyaz yapar         | çan, ışıltı, sıcak akor              |
+| 3.95 - 4.9  | Ekranda yalnızca "ANDROE STUDIO" kalır, sonra yumuşakça kararır          | ses söner                            |
 
 ## Çalıştırma
 
@@ -44,7 +44,7 @@ Linux'ta `skia-python` için `libegl1` paketi gerekebilir (`sudo apt install lib
 
 ## Düzenleme
 
-- Zamanlama: `scene.py` başındaki `T_IN`, `T_MOVES`, `T_GLINT`, `T_OUT` (ses de bunlara göre kendini ayarlar)
+- Zamanlama: `scene.py` başındaki `T_IN`, `T_MOVES`, `T_EXIT`, `T_GLIDE`, `T_SHINE`, `T_OUT` (ses de bunlara göre kendini ayarlar)
 - İkon: `ICON_TILT` (eğiklik), `ICON_HOLE` (delik), `ICON_DEPTH` (kalınlık), `ICON_BIG` / `ICON_SMALL` (boyut)
 - Yazı boyutu ve aralıklar: `FONT_SIZE`, `TRACK`, `GAP`
 - Notalar ve akor: `sound.py` içindeki `NOTES` ve `CHORD`
