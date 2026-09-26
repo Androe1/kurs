@@ -4,13 +4,14 @@ Akış (saniye):
   0.35 - 3.05  A N D R O E harfleri tek tek, eğik paneller arasında dönerek gelir;
                her harfte zemin değişir (beyaz / siyah / gri). Son harf ekranı doldurur.
   3.05 - 3.45  Glitch geçişi: görüntü şeritlere bölünür, kayar, beyaza patlar.
-  3.45 - 5.35  1. karakter (androe) - siyah, beyaz, gri: aşağıdan fırlar, eğik
-               rampanın önünde panikle koşar, sonra boşluğa düşer.
-  5.35 - 7.25  2. karakter (androeofficial) - siyah, beyaz, altın: aşağıdan
-               dönerek yükselir, kameraya doğru atlar, havada asılı kalır,
-               dönerek boşluğa düşer.
-  7.25 - 7.65  Altın / siyah / beyaz paneller ekranı süpürür, siyaha kesilir.
-  7.65 - 10.0  Siyah zeminde beyaz "ANDROE STUDIO" glitch efektiyle kurulur,
+  3.45 - 5.05  1. karakter (androe) - siyah, beyaz, gri: Pomni gibi aşağıdan fırlar,
+               havada öne eğik çırpınır (kollar değirmen gibi döner, bacaklar
+               boşlukta pedal çevirir), sonra kollar yukarıda boşluğa düşer.
+  5.05 - 6.75  2. karakter (androeofficial) - siyah, beyaz, altın: Caine gibi dik
+               ve toplu dönerek yükselir, açılıp ekranı çapraz kesen dramatik
+               pozda asılı kalır, sonra düşer. Hareketler choreo.py'de.
+  6.75 - 7.15  Altın / siyah / beyaz paneller ekranı süpürür, siyaha kesilir.
+  7.15 - 10.0  Siyah zeminde beyaz "ANDROE STUDIO" glitch efektiyle kurulur,
                üzerinden ışık geçer, sonra kararır.
 
 Sağ altta "Inspired by Glitch Productions" yazar; rengi her pikselde altındaki
@@ -26,7 +27,8 @@ from pathlib import Path
 import numpy as np
 import skia
 
-from rig import R6Character, Renderer, euler, look_at
+from choreo import AndroeChoreo, OfficialChoreo
+from rig import R6Character, Renderer, look_at
 
 ROOT = Path(__file__).resolve().parent
 FONTS = ROOT / "fonts"
@@ -106,158 +108,18 @@ def hexagon(x, y, r, rot):
 
 # ---------------------------------------------------------------- karakter hareketleri
 
-def ang(x=0.0, y=0.0, z=0.0):
-    return (x, y, z)
-
-
-# Pomni'nin asılı kalışı referansta art arda birkaç pozdan geçer; aynı akışı anahtar
-# pozlarla kurup aralarını Catmull-Rom ile (hız kesintisiz) dolduruyoruz.
-# Gövde kalçadan kameraya doğru öne eğik, kafa kalkık kameraya bakar.
-FLAIL_KEYS = [
-    (0.30, {"torso": ang(x=-0.62), "head": ang(x=0.95, y=0.15),                  # el yukarıdan kameraya uzanır
-            "right_arm": ang(x=2.9, z=0.3), "left_arm": ang(x=0.6, z=-0.3),
-            "right_leg": ang(x=0.75, z=0.1), "left_leg": ang(x=0.55, z=-0.1)}),
-    (0.55, {"torso": ang(x=-0.78, y=0.1), "head": ang(x=1.05, y=-0.1),           # iki kol aşağıya uzanır
-            "right_arm": ang(x=1.45, z=0.2), "left_arm": ang(x=1.3, z=-0.25),
-            "right_leg": ang(x=0.25, z=0.12), "left_leg": ang(x=0.45, z=-0.12)}),
-    (0.80, {"torso": ang(x=-0.55, y=-0.08), "head": ang(x=0.9, y=0.2),           # kollar toplanır, bacak tekmeler
-            "right_arm": ang(x=0.95, z=0.65), "left_arm": ang(x=0.5, z=-0.7),
-            "right_leg": ang(x=1.25, z=0.1), "left_leg": ang(x=0.2, z=-0.15)}),
-    (1.05, {"torso": ang(x=-0.62, y=0.05), "head": ang(x=0.95, y=-0.15),         # kol yukarıda sallanır
-            "right_arm": ang(x=2.55, z=0.95), "left_arm": ang(x=1.0, z=-0.4),
-            "right_leg": ang(x=0.7, z=0.1), "left_leg": ang(x=0.85, z=-0.1)}),
-]
-
-
-def catmull(keys, t):
-    """Anahtar pozlar arasında hızı kesintisiz geçiş (Catmull-Rom)."""
-    times = [k[0] for k in keys]
-    if t <= times[0]:
-        return keys[0][1]
-    if t >= times[-1]:
-        return keys[-1][1]
-    i = max(j for j in range(len(times)) if times[j] <= t)
-    u = (t - times[i]) / (times[i + 1] - times[i])
-    p0, p1, p2, p3 = (keys[min(max(j, 0), len(keys) - 1)][1] for j in (i - 1, i, i + 1, i + 2))
-    out = {}
-    for part in p1:
-        out[part] = tuple(0.5 * (2 * b + (-a + c) * u + (2 * a - 5 * b + 4 * c - d) * u * u
-                                 + (-a + 3 * b - 3 * c + d) * u ** 3)
-                          for a, b, c, d in zip(p0[part], p1[part], p2[part], p3[part]))
-    return out
-
-
-def flail_pose(t):
-    """Pomni gibi havada panik; t karakterin sahneye girişinden beri geçen süre."""
-    return catmull(FLAIL_KEYS, t)
-
-
-def launch_pose(t):
-    """Aşağıdan fırlatılırken: kollar ve bacaklar hızın etkisiyle aşağıda kalır."""
-    w = math.sin(2 * math.pi * 3 * t)
-    return {
-        "right_arm": ang(x=0.25 + 0.1 * w, z=0.3),
-        "left_arm": ang(x=0.15 - 0.1 * w, z=-0.3),
-        "right_leg": ang(x=0.15, z=0.08),
-        "left_leg": ang(x=-0.1, z=-0.08),
-        "head": ang(x=0.35),
-    }
-
-
-def fall_pose(t):
-    """Düşerken kollar yukarıda çırpınır, bacaklar açılır."""
-    w = math.sin(2 * math.pi * 4 * t)
-    up = 2 * math.pi - 2.6                    # kollar yukarıda (öne doğru kalkmış yönden)
-    return {
-        "right_arm": ang(x=up + 0.3 * w, z=0.5),
-        "left_arm": ang(x=up - 0.3 * w, z=-0.5),
-        "right_leg": ang(x=0.5 + 0.2 * w, z=0.2),
-        "left_leg": ang(x=-0.4 - 0.2 * w, z=-0.2),
-        "head": ang(x=-0.3),
-    }
-
-
-def leap_pose(k, h=0.0):
-    """Caine gibi dramatik poz (k: 0 toplu, 1 tam açılmış; h: asılı kalışta 0->1 ilerleme).
-    Gövde öne eğik ve çapraz; asılıyken kol yavaşça yukarı açılır, bacaklar açılıp kapanır."""
-    return {
-        "torso": ang(x=(-0.55 - 0.12 * h) * k, y=(0.15 - 0.1 * h) * k),     # kameraya doğru öne eğik
-        "head": ang(x=1.05 * k, y=(0.15 - 0.3 * h) * k),                   # kafa kalkık, kameraya bakar
-        "right_arm": ang(x=(-0.2 - 0.35 * h) * k, z=(2.6 + 0.55 * h) * k), # kol yukarı-yana açılır
-        "left_arm": ang(x=(1.0 + 0.3 * h) * k, z=(-0.55 - 0.2 * h) * k),   # diğeri aşağı-öne
-        "right_leg": ang(x=(-0.2 + 0.35 * h) * k, z=(0.6 - 0.25 * h) * k), # biri geride, açık
-        "left_leg": ang(x=(1.2 - 0.5 * h) * k, z=(-0.4 + 0.15 * h) * k),   # diğeri dizden öne
-    }
-
-
-def blend_pose(a, b, k):
-    """İki poz arasında yumuşak geçiş: her eklemin açıları doğrusal karışır (ani dönüş olmaz)."""
-    zero = (0.0, 0.0, 0.0)
-    return {part: tuple((1 - k) * p + k * q for p, q in zip(a.get(part, zero), b.get(part, zero)))
-            for part in set(a) | set(b)}
-
-
-def to_matrices(pose):
-    return {part: euler(*angles) for part, angles in pose.items()}
-
-
-def arc(t, t0, rise, hang, top, bottom=-7.0, drop=17.0):
-    """Örnek videodan ölçülen dikey hareket: yükseliş -> asılı kalış -> düşüş.
-
-    Yükseliş hafif aşarak (ease-out-back) durur; asılı kalışta yavaş süzülür;
-    düşüş sıfır hızla başlayıp yerçekimi gibi hızlanır. Hız hiçbir yerde
-    kesintiye uğramaz, bu yüzden hareket akıcıdır.
-    """
-    u = span(t, t0, t0 + rise)
-    y = bottom + (top - bottom) * (ease_out_back(u, 0.7) if u < 1 else 1.0)
-    hold = t - (t0 + rise)
-    if hold > 0:
-        y += 0.18 * math.sin(math.pi * min(hold / hang, 1.0))        # asılıyken hafifçe süzülür
-    fall = t - (t0 + rise + hang)
-    if fall > 0:
-        y -= drop * fall * fall                                        # düşüş: y = g t^2
-    return y
+ANDROE_MOVES = AndroeChoreo()
+OFFICIAL_MOVES = OfficialChoreo()
 
 
 def char1_state(t):
-    """androe: aşağıdan fırlar, havada panikle çırpınır, sonra boşluğa düşer."""
-    a, _ = T_CHAR1
-    rise, hang = 0.28, 0.8
-    y = arc(t, a, rise, hang, top=1.1)
-    u_rise = span(t, a, a + rise)
-    u_fall = clamp01((t - a - rise - hang) / 0.45)
-    # kollar yükselişin sonunda açılmaya devam eder: dönüş hızı yumuşak kalır
-    pose = blend_pose(launch_pose(t), flail_pose(t - a), ease_in_out(span(t, a, a + rise + 0.12)))
-    pose = blend_pose(pose, fall_pose(t), ease_in_out(u_fall))
-    yaw = -0.6 + 0.15 * math.sin(2 * math.pi * 0.6 * t)            # havada hafifçe döner
-    roll = 0.15 * math.sin(2 * math.pi * 0.8 * t + 0.7) + 0.5 * ease_in(u_fall)
-    tilt = -0.15 - 0.3 * (1 - ease_out(u_rise)) + 1.6 * ease_in(u_fall)
-    x = 0.5 + 0.35 * span(t, a, a + rise + hang) - 1.2 * ease_in(u_fall)
-    z = -1.6 * ease_out(u_rise) + 1.0 * u_fall
-    return to_matrices(pose), euler(y=yaw, x=tilt, z=roll), np.array([x, y, z])
+    """androe: Pomni gibi aşağıdan fırlar, havada çırpınır, boşluğa düşer (bkz. choreo.py)."""
+    return ANDROE_MOVES.state(t - T_CHAR1[0])
 
 
 def char2_state(t):
-    """androeofficial: dönerek yükselip kameraya yaklaşır, havada dramatik pozda durur, düşer."""
-    a, _ = T_CHAR2
-    rise, hang = 0.34, 0.85
-    y = arc(t, a, rise, hang, top=0.3, bottom=-8.0)
-    u_rise = span(t, a, a + rise)
-    u_hang = span(t, a + rise, a + rise + hang)
-    u_fall = clamp01((t - a - rise - hang) / 0.45)
-    e = ease_out(u_rise)
-    pose = blend_pose(launch_pose(t), leap_pose(0.25 + 0.75 * e, ease_in_out(u_hang)), ease_in_out(span(t, a, a + rise + 0.15)))
-    fall = fall_pose(t)
-    fall["right_arm"] = ang(x=-0.3, z=2.7 + 0.2 * math.sin(2 * math.pi * 4 * t))   # açık kol yukarıda kalır
-    pose = blend_pose(pose, fall, ease_in_out(u_fall))
-    spin = -2 * math.pi * (1 - e)                                    # yükselirken bir tur döner
-    yaw = 0.2 + spin + 0.08 * u_hang + 3.0 * ease_in(u_fall)
-    tilt = -0.2 * e + 0.05 * u_hang + 0.8 * ease_in(u_fall)
-    roll = -0.35 * e - 0.04 * u_hang + 0.3 * u_fall
-    # yükselirken kameraya yaklaşır, asılıyken yavaşça uzaklaşır (ölçülen boy değişimi gibi)
-    z = -1.8 * e + 0.9 * ease_in_out(u_hang) + 1.2 * u_fall
-    x = -0.5 + 1.0 * e + 0.15 * u_hang + 1.0 * ease_in(u_fall)
-    return to_matrices(pose), euler(y=yaw, x=tilt, z=roll), np.array([x, y, z])
+    """androeofficial: Caine gibi dönerek yükselir, çapraz dramatik pozda asılı kalır, düşer."""
+    return OFFICIAL_MOVES.state(t - T_CHAR2[0])
 
 
 # ---------------------------------------------------------------- sahne
