@@ -152,6 +152,7 @@ class Renderer:
 
         self._kuwahara_kernel()
         self.text_tex = None
+        self.petal_tex = None
         self.rose_vbo = None
         self.rose_vao = {}
         self.n_vertices = 0
@@ -267,6 +268,17 @@ class Renderer:
         prog["u_pupils"].value = (*map(float, pupils[0]), *map(float, pupils[1]))
         prog["u_pupil_r"].value = float(pupil_r)
 
+    def set_petal_texture(self, tex, pal):
+        """Referans çizimden döşenebilir yaprak fırça dokusu ve renk paleti (gölge, orta, parlak, kenar vurgusu)."""
+        h, w, _ = tex.shape
+        t = self.ctx.texture((w, h), 4, np.ascontiguousarray(tex, "f4").tobytes(), dtype="f4")
+        t.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
+        t.build_mipmaps()
+        t.repeat_x = t.repeat_y = True
+        self.petal_tex = t
+        hues = np.asarray(pal, "f4") / np.asarray(pal, "f4")[:, :1]        # kırmızı = 1
+        self.set_uniforms("rose", u_petal_tex=11, u_petal_on=1.0, u_pal=hues.tobytes())
+
     def set_text(self, sharp, blurred):
         """COMING SOON maskeleri (H, W) float32 0..1, üst satır görüntünün üstü."""
         def tex(a):
@@ -294,7 +306,7 @@ class Renderer:
                       u_light_vp=mat(light_vp), u_back_dir=tuple(lights["back_dir"]),
                       u_back_col=tuple(lights["back_col"]), u_light_gain=float(lights["gain"]),
                       u_time=float(st["t"]), u_shadow=1, u_view3=view3,
-                      u_toon=float(st.get("toon", 1.0)))
+                      u_toon=float(st.get("toon", 1.0)), u_petal_amt=float(st.get("petal_tex", 1.4)), u_petal_scale=float(st.get("petal_scale", 0.7)))
         scene_on = st.get("scene_on", True)
         liq = st["liquid"]
 
@@ -441,6 +453,8 @@ class Renderer:
         ctx.enable(moderngl.DEPTH_TEST)
         ctx.disable(moderngl.BLEND)
         self.shadow_tex.use(1)
+        if self.petal_tex is not None:
+            self.petal_tex.use(11)
         self.set_uniforms("rose", u_viewproj=mat(vp), u_mirror=float(mirror), u_eye=tuple(eye),
                           u_amb=tuple(st["lights"]["amb"]), u_floor_glow=float(st["lights"]["floor_glow"]), **common)
         self.rose_vao["rose"].render()

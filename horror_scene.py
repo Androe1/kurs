@@ -23,10 +23,9 @@ import math
 
 import numpy as np
 from scipy.spatial.transform import Rotation as Rot
-from scipy.spatial.transform import Slerp
 
 from horror_gl import look_at, perspective
-from horror_rose import Rose
+from horror_rose import Rose, grid_normals
 
 DURATION = 15.0
 
@@ -45,10 +44,13 @@ T_EYES = 11.75              # kapaklar açılır
 T_CUT = 12.95
 T_TITLE = 13.15
 T_END_FADE = (14.45, 15.0)
+FLASHES = ((9.345, 9.38), (10.38, 10.415))   # ışık sönük kaldığı 2 karede gözler bilinçaltı görünür
+T_ESCALATE = (12.3, 12.95)                   # gözler giderken artan sarsıntı ve kararma
 
 ROSE_SCALE = 0.5
 MORPH_Y = 2.2
-MORPH_X = 0.12              # dönüşüm biraz sağda: yaprak gibi salınım sola kayar, iniş havuzun ortasına yakın
+MORPH_X = 0.22              # dönüşüm biraz sağda: yaprak gibi süzülüş sola açılır, iniş havuzun ortasına yakın
+SWING_YAW = math.radians(20.0)   # salınım düzlemi kameraya göre hafif dönük (derinlik hissi)
 REST_Y = 0.045              # gül sıvıda yüzerken merkezinin yüksekliği
 CONTACT_Y = REST_Y + 0.02   # alt yapraklar yüzeye değdiği an
 ANCHOR = np.array([MORPH_X, 3.4, 0.0])
@@ -179,7 +181,7 @@ class RoseMotion:
     sallanarak düzelir. Tüm hızlar süreklidir."""
 
     # düşen yaprak modelinin parametreleri (boyutsuz; zaman ölçeği g ile ayarlanır)
-    LEAF = dict(l=0.62, beta=1 / 8, istar=0.5, keel=0.15, mu2=0.9, theta0=0.45)
+    LEAF = dict(l=1.05, beta=1 / 8, istar=0.45, keel=0.25, mu2=1.3, theta0=0.45)
 
     def __init__(self, dt=1 / 600):
         drop = MORPH_Y - CONTACT_Y
@@ -213,7 +215,7 @@ class RoseMotion:
                 vx[i] = np.interp(tau, lt, lvx)
                 vy[i] = np.interp(tau, lt, lvy)
                 bank[i] = np.interp(tau, lt, lth)
-                yaw_v += (math.radians(28.0) - yaw_v) * min(dt / 0.6, 1.0)
+                yaw_v += (math.radians(22.0) - yaw_v) * min(dt / 0.8, 1.0)
                 yaw[i] = yaw[i - 1] + yaw_v * dt
             else:
                 if sy is None:
@@ -248,102 +250,194 @@ class RoseMotion:
         sway = 0.0
         if t < T_SNAP:     # iplikte asılıyken hafif sarkaç
             sway = 0.004 * math.sin(2 * math.pi * 0.62 * t + 0.4) * smooth(span(t, T_BUD, T_BUD + 0.6))
-        return np.array([sway + self._s(self.x, t), self._s(self.y, t), 0.4 * sway])
+        dx = self._s(self.x, t) - MORPH_X                 # salınım düzleminde yatay yol
+        return np.array([MORPH_X + dx * math.cos(SWING_YAW) + sway, self._s(self.y, t),
+                         -dx * math.sin(SWING_YAW) + 0.4 * sway])
 
     def velocity(self, t):
         return self._s(self.vy, t)
 
     def velocity_xy(self, t):
-        return np.array([self._s(self.vx, t), self._s(self.vy, t), 0.0])
+        vx = self._s(self.vx, t)
+        return np.array([vx * math.cos(SWING_YAW), self._s(self.vy, t), -vx * math.sin(SWING_YAW)])
 
     def rotation(self, t):
-        """Önce kendi ekseninde dönüş (yaw), sonra ekran düzleminde yatış (bank)."""
-        return Rot.from_euler("z", self._s(self.bank, t)) * Rot.from_euler("y", self._s(self.yaw, t))
+        """Önce kendi ekseninde dönüş (yaw), sonra salınım düzleminde yatış (bank)."""
+        axis = np.array([math.sin(SWING_YAW), 0.0, math.cos(SWING_YAW)])
+        return Rot.from_rotvec(axis * self._s(self.bank, t)) * Rot.from_euler("y", self._s(self.yaw, t))
 
 
-# ---------------------------------------------------------------- kopan yapraklar
+# ---------------------------------------------------------------- yaprakların ikincil hareketi
 
-class FallingPetal:
-    """Çarpmanın kopardığı yaprak: küçük sıçrama, hava direnciyle sallanarak düşüş, sıvıda yüzme."""
+def ripple_height(rows, x, z, t):
+    """Zemin shader'ındaki dalga yüksekliğinin aynısı (yüzen yapraklar dalgaya binsin)."""
+    h = 0.0
+    for x0, z0, t0, amp, lam, speed, decay, _ in rows:
+        tau = t - t0
+        if tau <= 0:
+            continue
+        d = math.hypot(x - x0, z - z0)
+        xx = speed * tau - d
+        if xx < -0.04:
+            continue
+        lam2 = lam * (1 - 0.4 * smooth(xx / 0.5))
+        env = smooth((xx + 0.035) / 0.055) * math.exp(-max(xx, 0.0) / (0.1 + 0.22 * min(tau, 2.0)))
+        h += amp * env * math.sin(2 * math.pi * xx / lam2) * math.exp(-tau / decay) / math.sqrt(1 + d / 0.04)
+    return h
 
-    def __init__(self, idx, t_detach, kick_out, kick_up, sway_freq, spin, rose, motion, seed):
-        self.idx, self.t0 = idx, t_detach
+
+class PetalDynamics:
+    """Yaprakların ikincil hareketi (overlap & follow-through).
+
+    Her yaprak tabanındaki menteşe etrafında kütleli, az sönümlü bir yaydır: gülün ivmesi (atalet)
+    ve hava akışı (sürükleme basıncı) yaprağı açar ya da kapar; yaprak gecikmeyle tepki verir, aşar,
+    sallanarak oturur. Dış yapraklar büyük ve gevşektir (≈3 Hz), içtekiler sert (≈8 Hz): farklı
+    frekanslar çakışan hareketi kendiliğinden üretir. Hava hızının karesiyle büyüyen bant sınırlı
+    titreşim yaprak uçlarını rüzgarda çırpındırır.
+    """
+
+    def __init__(self, rose, motion, t0, t1, detach=(), dt=1 / 600, seed=5):
         rng = np.random.default_rng(seed)
-        p = rose.petals[idx]
-        local, _, _ = rose.petal(idx, 1.0)
-        local = local.reshape(-1, 3) * ROSE_SCALE
-        self.c_loc = local.mean(0)
-        R0 = motion.rotation(t_detach)
-        self.R0 = R0
-        self.C0 = motion.position(t_detach) + R0.apply(self.c_loc)
-        out = R0.apply([math.sin(p.phi), 0.0, math.cos(p.phi)])
-        out[1] = 0.0
-        out = unit(out)
-        self.out = out
-        # yaprağın iç (çukur) yüzü yukarı bakacak şekilde yüzerek duracağı yön
-        _, nrm, _ = rose.petal(idx, 1.0)
-        n_in = -unit(nrm.reshape(-1, 3).mean(0))
-        n_world = R0.apply(n_in)
-        axis = np.cross(n_world, [0.0, 1.0, 0.0])
-        ang = math.acos(np.clip(np.dot(n_world, [0.0, 1.0, 0.0]), -1, 1))
-        Rflat = Rot.from_rotvec(unit(axis) * ang) if np.linalg.norm(axis) > 1e-6 else Rot.identity()
-        self.R_end = Rot.from_euler("y", spin) * Rflat * R0
-        rel = self.R_end.apply(local - self.c_loc)
-        self.rest_h = -rel[:, 1].min() + 0.002
-        # yörünge: sürüklemeli balistik + sallanma (sayısal)
-        dt = 1 / 600
-        pos = self.C0.copy()
-        vel = np.array([out[0] * kick_out, kick_up, out[2] * kick_out]) + motion.velocity_xy(t_detach)
-        g_eff = 3.0
-        c_up, c_down = g_eff / 1.3 ** 2, g_eff / 0.34 ** 2      # yukarı giderken ince kenarı, düşerken geniş yüzü karşılar
-        side = unit(np.cross(out, [0.0, 1.0, 0.0]))
-        ts, P, landed = [], [], None
-        spring = None
-        t = t_detach
-        while t < DURATION + 0.05:
-            tau = t - t_detach
-            if landed is None:
-                speed = np.linalg.norm(vel)
-                c = c_up if vel[1] > 0 else c_down
-                acc = np.array([0.0, -g_eff, 0.0]) - c * speed * vel * np.array([0.3, 1.0, 0.3])
-                # sallanma: yana itiş (sıfırdan başlar, hız süreklidir)
-                acc += side * 1.4 * math.sin(2 * math.pi * sway_freq * tau) * (1 - math.exp(-tau / 0.15))
-                vel = vel + acc * dt
-                pos = pos + vel * dt
-                if pos[1] <= self.rest_h and vel[1] < 0:
-                    landed = t
-                    self.land_pos = pos.copy()
-                    spring = Spring(pos[1], 2.5, 0.5)
-                    spring.v = np.array(vel[1])
-                    hvel = vel * np.array([1.0, 0.0, 1.0])
-            else:
-                hvel = hvel * math.exp(-dt / 0.5) + out * 0.012 * dt
-                pos = pos + hvel * dt
-                pos[1] = float(spring.step(self.rest_h, dt))
-            ts.append(t)
-            P.append(pos.copy())
-            t += dt
-        self.ts = np.array(ts)
-        self.P = np.array(P)
-        self.t_land = landed if landed is not None else DURATION
-        self.sway_freq = sway_freq
-        self.side = side
-        self.slerp = Slerp([0.0, 1.0], Rot.concatenate([R0, self.R_end]))
-        self.seed = rng.uniform(0, 6.28)
+        n = rose.n
+        ts = np.arange(t0, t1, dt)
+        pos = np.array([motion.position(t) for t in ts])
+        vel = np.gradient(pos, dt, axis=0)
+        acc = np.gradient(vel, dt, axis=0)
+        k = np.array([p.k for p in rose.petals])
+        alpha = np.array([p.alpha for p in rose.petals])
+        phi = np.array([p.phi for p in rose.petals])
+        gain = 0.25 + 0.75 * k ** 2
+        w = 2 * math.pi * (3.0 + 5.0 * (1 - k) ** 1.5)
+        zeta = 0.22
+        loose = np.ones(n)
+        for i in detach:
+            loose[i] = 2.2                               # kopacak yapraklar gevşemiştir
+        d = np.zeros(n)
+        dv = np.zeros(n)
+        D = np.zeros((len(ts), n))
+        DV = np.zeros((len(ts), n))
+        U = np.zeros(len(ts))
+        er_l = np.stack([np.sin(phi), np.zeros(n), np.cos(phi)], -1)
+        for j, t in enumerate(ts):
+            R = motion.rotation(t)
+            er = R.apply(er_l)
+            up = R.apply([0.0, 1.0, 0.0])
+            n_out = er * np.cos(alpha)[:, None] - up[None, :] * np.sin(alpha)[:, None]
+            u = -vel[j]
+            speed = float(np.linalg.norm(u))
+            inert = -(n_out @ acc[j])                     # atalet: gül yavaşlarsa yapraklar açılır
+            aero = speed * (n_out @ u)                    # hava basıncı: düşerken dış yaprakları kapar
+            post = loose if t >= T_LAND else 1.0
+            target = gain * (0.035 * inert + 0.2 * aero) * post
+            a = w ** 2 * (target - d) - 2 * zeta * w * dv
+            dv = dv + a * dt
+            d = d + dv * dt
+            D[j], DV[j], U[j] = d, dv, speed
+        self.ts, self.D, self.DV, self.U = ts, D, DV, U
+        self.k = k
+        # rüzgarda titreme: yaprak başına üç rastgele frekanslı yumuşak salınım
+        self.fl_f = rng.uniform(5.5, 9.5, (n, 3))
+        self.fl_p = rng.uniform(0, 2 * math.pi, (n, 3))
+        self.wave_f = rng.uniform(3.0, 4.5, n)
+        self.u_ref = max(float(U.max()), 1e-3)
 
-    def transform(self, t):
-        """(konum, dönüş): köşe = C + R · (p_yerel·ölçek - c_yerel)."""
-        C = np.array([np.interp(t, self.ts, self.P[:, k]) for k in range(3)])
-        dur = max(self.t_land - self.t0, 0.2)
-        u = smoother(span(t, self.t0, self.t0 + dur))
-        base = self.slerp([u])[0]
-        tau = t - self.t0
-        rock = math.radians(38.0) * math.sin(2 * math.pi * self.sway_freq * tau + self.seed) \
-            * (1 - math.exp(-tau / 0.12)) * (1 - smooth(span(t, self.t_land - 0.25, self.t_land + 0.15)))
-        wob = math.radians(4.0) * math.sin(2 * math.pi * 0.9 * (t - self.t_land)) * math.exp(-max(t - self.t_land, 0) / 0.8) \
-            * (t > self.t_land)
-        R = Rot.from_rotvec(self.out * rock) * Rot.from_rotvec(self.side * wob) * base
-        return C, R
+    def at(self, t):
+        """(sapma, sapma hızı, hava hızı oranı) dizileri."""
+        f = (t - self.ts[0]) / (self.ts[1] - self.ts[0])
+        if f <= 0:
+            return np.zeros(len(self.k)), np.zeros(len(self.k)), 0.0
+        i = int(min(math.floor(f), len(self.ts) - 2))
+        u = min(f - i, 1.0)
+        D = self.D[i] * (1 - u) + self.D[i + 1] * u
+        DV = self.DV[i] * (1 - u) + self.DV[i + 1] * u
+        U = self.U[i] * (1 - u) + self.U[i + 1] * u
+        return D, DV, U / self.u_ref
+
+    def flex(self, t, i, D=None, s=None):
+        if D is None:
+            D, _, s = self.at(t)
+        k = self.k[i]
+        amp = (s ** 2) * k ** 2
+        flutter = amp * 0.04 * sum(math.sin(2 * math.pi * self.fl_f[i, m] * t + self.fl_p[i, m]) / (m + 1) for m in range(3))
+        return dict(open=float(D[i] + flutter), curl=float(0.6 * D[i]), wave=0.028 * amp,
+                    phase=2 * math.pi * self.wave_f[i] * t, edge=0.05 * amp,
+                    edge_phase=2 * math.pi * 7.3 * t + self.fl_p[i, 0])
+
+
+def fp_normals(fp):
+    """Kopan yaprağın donmuş yerel şeklinin normalleri (gül uzayında)."""
+    if getattr(fp, "_nrm", None) is None:
+        from horror_rose import NA, NB
+        fp._nrm = grid_normals((fp.local / ROSE_SCALE).reshape(NB, NA, 3)).reshape(-1, 3)
+    return fp._nrm
+
+
+class DetachedPetal:
+    """Çarpmada gevşeyen dış yaprak: ikincil hareketin itişiyle tabanındaki menteşe etrafında dışa
+    doğru açılmaya devam eder (soyulur), yatarak sıvının üstüne kapanır; sonra dalganın ittiği
+    yönde yavaşça sürüklenip dönerek dalgalara biner. Zıplatma ya da ani itiş yoktur: kopma anındaki
+    konum, dönüş ve açısal hız sürekli devam eder."""
+
+    def __init__(self, idx, scene, t_d):
+        rose, motion = scene.rose, scene.motion
+        self.idx, self.t0 = idx, t_d
+        b = float(scene.petal_bloom(t_d)[idx])
+        D, DV, s = scene.dyn.at(t_d)
+        flex = scene.dyn.flex(t_d, idx, D, s)
+        local, nrm, _ = rose.petal(idx, b, flex=flex)
+        R0 = motion.rotation(t_d)
+        C0 = motion.position(t_d)
+        base_l, axis_l = rose.hinge(idx, b)
+        self.R0, self.C0 = R0, C0
+        self.local = local.reshape(-1, 3) * ROSE_SCALE
+        self.hinge_l = base_l * ROSE_SCALE
+        self.axis = R0.apply(axis_l)
+        p = rose.petals[idx]
+        self.out = unit(R0.apply([math.sin(p.phi), 0.0, math.cos(p.phi)]) * np.array([1.0, 0.0, 1.0]))
+        # yatarak kapanma açısı: yaprağın ağırlık merkezi yönü yataydan biraz aşağıya inene kadar
+        cen = R0.apply(self.local.mean(0) - self.hinge_l)
+        el = math.asin(np.clip(cen[1] / np.linalg.norm(cen), -1, 1))
+        self.beta_flat = el + math.radians(8.0)
+        # açılma: kopma anındaki açısal hızla başlar, yerçekimi ve sıvı onu düz yatırır
+        dt = 1 / 600
+        beta, bv = 0.0, float(DV[idx])
+        ts, B = [], []
+        t = t_d
+        w = 2 * math.pi * 1.4
+        while t < DURATION + 0.05:
+            a = w * w * (self.beta_flat - beta) - 2 * 0.62 * w * bv
+            bv += a * dt
+            beta += bv * dt
+            ts.append(t)
+            B.append(beta)
+            t += dt
+        self.ts, self.B = np.array(ts), np.array(B)
+        # yere yatma anı (dalga kaynağı) ve kayma başlangıcı
+        i_flat = int(np.argmax(self.B >= 0.85 * self.beta_flat)) if (self.B >= 0.85 * self.beta_flat).any() else len(ts) - 1
+        self.t_land = float(self.ts[i_flat])
+        self.land_pos = self._pose(self.t_land, ripple=False)[0]
+        self.rows = None
+
+    def _pose(self, t, ripple=True):
+        beta = float(np.interp(t, self.ts, self.B))
+        Rh = Rot.from_rotvec(self.axis * beta)
+        hinge_w = self.C0 + self.R0.apply(self.hinge_l)
+        # yattıktan sonra dışa doğru sürüklenme ve yavaş dönüş
+        tau = max(t - getattr(self, "t_land", t), 0.0)
+        drift = self.out * 0.1 * 1.3 * (1 - math.exp(-tau / 1.3))
+        spin = Rot.from_euler("y", 0.35 * 1.4 * (1 - math.exp(-tau / 1.4)))
+        R = spin * Rh * self.R0
+        rel = R.apply(self.local - self.hinge_l)
+        verts = hinge_w + drift + rel
+        # yüzme: en alt nokta sıvı yüzeyinin (dalga dahil) hemen üstünde kalır
+        c = verts.mean(0)
+        surf = ripple_height(self.rows, c[0], c[2], t) if (ripple and self.rows is not None) else 0.0
+        lift = max(0.0, surf + 0.0015 - verts[:, 1].min()) * smooth(tau / 0.15 if tau > 0 else 0.0)
+        return c + np.array([0.0, lift, 0.0]), R, hinge_w + drift + np.array([0.0, lift, 0.0])
+
+    def vertices(self, t):
+        c, R, hinge = self._pose(t)
+        return hinge + R.apply(self.local - self.hinge_l), R
 
 
 # ---------------------------------------------------------------- sahne
@@ -361,9 +455,13 @@ class Scene:
         self.tip_end = MORPH_Y + self.bud_center[1] + self.drop_r * 1.2
         self._top_local = self.bud_top
         self._bloom_schedule()
-        self._petals()
+        detach = self._pick_detach()
+        self.dyn = PetalDynamics(self.rose, self.motion, T_SNAP - 0.3, DURATION + 0.05, detach=detach)
+        self._petals(detach)
         self._droplets()
         self._ripples()
+        for fp in self.falling:
+            fp.rows = self.ripple_rows
         self._camera_tracks()
         self.renderer = None
         self._ao_key = None
@@ -397,10 +495,11 @@ class Scene:
                 dur[i] = 0.75 + 0.2 * (1 - self.rose.petals[i].k)
         self.bloom_t0, self.bloom_dur = t0, dur
 
-    def _petals(self):
-        """Çarpmayla kopacak iki dış yaprağı, kameradan iyi görünen yönlerden seç."""
+    def _pick_detach(self):
+        """Sıvıya önce değen (alçaktaki) tarafta, kameradan görünen iki dış yaprak."""
         R = self.motion.rotation(T_LAND)
         outer = [i for i, p in enumerate(self.rose.petals) if p.k > 0.8]
+        low_side = -1.0 if self.motion._s(self.motion.bank, T_LAND) > 0 else 1.0     # ekranda sol / sağ
 
         def world_az(i):
             p = self.rose.petals[i]
@@ -411,14 +510,23 @@ class Scene:
             cands = [i for i in outer if i not in exclude]
             return min(cands, key=lambda i: abs((world_az(i) - target + 180) % 360 - 180))
 
-        a = pick(84.0)
-        b = pick(-100.0, (a,))
-        self.falling = [
-            FallingPetal(a, T_LAND + 0.04, kick_out=0.45, kick_up=1.05, sway_freq=1.35, spin=0.7,
-                         rose=self.rose, motion=self.motion, seed=1),
-            FallingPetal(b, T_LAND + 0.30, kick_out=0.32, kick_up=0.7, sway_freq=1.1, spin=-0.5,
-                         rose=self.rose, motion=self.motion, seed=2),
-        ]
+        a = pick(low_side * 62.0)
+        b = pick(low_side * 118.0, (a,))
+        return (a, b)
+
+    def _petals(self, detach):
+        """Kopan yapraklar: çarpmadan sonra en çok açıldıkları anda menteşeden ayrılırlar."""
+        self.falling = []
+        ts, D = self.dyn.ts, self.dyn.D
+        for i, idx in enumerate(detach):
+            # birinci yaprak ilk açılışta, ikincisi bir salınım daha tutunup ikinci açılışta kopar;
+            # ayrılma, açılma hızını taşısın diye tepe noktasının %75'ine varıldığı anda olur
+            j0 = int(np.searchsorted(ts, T_LAND + (0.0 if i == 0 else 0.3)))
+            j1 = int(np.searchsorted(ts, T_LAND + (0.3 if i == 0 else 0.8)))
+            jm = j0 + int(np.argmax(D[j0:j1, idx]))
+            peak = D[jm, idx]
+            jr = j0 + int(np.argmax(D[j0:jm + 1, idx] >= 0.75 * peak))
+            self.falling.append(DetachedPetal(idx, self, float(ts[jr])))
         self.falling_idx = {fp.idx: fp for fp in self.falling}
 
     def _droplets(self):
@@ -510,8 +618,10 @@ class Scene:
             return 0.0
         g = 1.0
         for a, b, v in ((0.70, 0.745, 0.55), (0.745, 0.80, 0.02), (0.80, 0.83, 0.9), (0.83, 0.87, 0.3),
-                        (T_FLICKER, T_FLICKER + 0.05, 0.35), (T_FLICKER + 0.09, T_FLICKER + 0.12, 0.55),
-                        (10.28, 10.33, 0.2), (10.41, 10.44, 0.45)):
+                        (T_FLICKER, T_FLICKER + 0.03, 0.35), (FLASHES[0][0], FLASHES[0][1], 0.02),
+                        (T_FLICKER + 0.12, T_FLICKER + 0.15, 0.5),
+                        (10.08, 10.12, 0.3), (10.22, 10.25, 0.15), (FLASHES[1][0], FLASHES[1][1], 0.0),
+                        (10.5, 10.53, 0.3), (10.6, 10.62, 0.1)):
             if a <= t < b:
                 g = v
         g *= 1 - smooth(span(t, 10.0, 10.72))
@@ -565,16 +675,9 @@ class Scene:
     # ------------------------------------------------------------ gül ağı
 
     def petal_bloom(self, t):
+        """Yaprakların açılma oranı (açılma programı; ikincil hareket PetalDynamics'te)."""
         u = np.clip((t - self.bloom_t0) / self.bloom_dur, 0, 1)
-        b = np.array([ease_out_back(x, 1.2) for x in u])
-        # düşerken hava direnci dış yaprakları biraz kapatır, çarpmada açılıp titrer
-        v = -self.motion.velocity(t) / self.motion.vt
-        k = np.array([p.k for p in self.rose.petals])
-        flex = -0.08 * v * k ** 2
-        k_land = t - T_LAND
-        if k_land > 0:
-            flex += 0.06 * k ** 2 * math.exp(-k_land / 0.35) * math.sin(k_land * 2 * math.pi * 2.2)
-        return b + flex
+        return np.array([ease_out_back(x, 1.2) for x in u])
 
     def petal_liquid(self, t):
         u = np.clip((t - self.bloom_t0) / self.bloom_dur, 0, 1)
@@ -593,9 +696,12 @@ class Scene:
         R = self.motion.rotation(t)
         C = self.motion.position(t)
         rose = self.rose
+        D, _, sp = self.dyn.at(t)
+        dyn_on = t >= T_SNAP - 0.3
         locs, nrms, uvs = [], [], []
         for i in range(self.n):
-            pos, nrm, uv = rose.petal(i, float(bloom[i]))
+            flex = self.dyn.flex(t, i, D, sp) if dyn_on else None
+            pos, nrm, uv = rose.petal(i, float(bloom[i]), flex=flex)
             # sıvıdan biçimlenirken yüzeyde akan dalgalar
             lq = float(liquid[i])
             if lq > 0.02:
@@ -609,7 +715,14 @@ class Scene:
         # ortam kapanması: gülün kendi uzayında, açılma durumu değiştikçe yeniden
         key = np.round(bloom, 2).tobytes()
         if key != self._ao_key:
-            self._ao = self._bake_ao(locs, nrms)
+            # ortam kapanması esnemesiz şekilden (ikincil hareket küçük; her karede yeniden hesaplanmaz)
+            if dyn_on:
+                base = [rose.petal(i, float(bloom[i])) for i in range(self.n)]
+                bl = [b[0].reshape(-1, 3) for b in base]
+                bn = [b[1].reshape(-1, 3) for b in base]
+            else:
+                bl, bn = locs, nrms
+            self._ao = self._bake_ao(bl, bn)
             self._ao_key = key
         verts = np.zeros((self.n * nv, 14), "f4")
         for i in range(self.n):
@@ -618,10 +731,9 @@ class Scene:
             n_loc = nrms[i]
             if i in self.falling_idx and t >= self.falling_idx[i].t0:
                 fp = self.falling_idx[i]
-                Cp, Rp = fp.transform(t)
-                pw = Cp + Rp.apply(locs[i] * ROSE_SCALE - fp.c_loc)
-                nw = Rp.apply(n_loc)
-                sep = smooth(span(t, fp.t0, fp.t0 + 0.4))
+                pw, Rp = fp.vertices(t)
+                nw = Rp.apply(fp_normals(fp))
+                sep = smooth(span(t, fp.t0, fp.t0 + 0.5))
                 ao = self._ao[sl] * (1 - sep) + 0.92 * sep
             else:
                 pw = C + R.apply(p_loc)
@@ -744,6 +856,9 @@ class Scene:
     def eyes(self, t):
         """Kullanıcının çizdiği gözler: önce kapalı belirir, seğirir, sonra kapaklar açılır; göz bebekleri
         büyükten iğne ucuna büzülür, kamera sarsılır."""
+        for a, b in FLASHES:
+            if a <= t < b:
+                return self._flash_eyes(t, a)
         if t < T_EYES_SHOW or t >= T_CUT:
             return None
         show = ease_out(span(t, T_EYES_SHOW, T_EYES_SHOW + 0.45), 2.0)
@@ -762,12 +877,14 @@ class Scene:
         sacc = rng.uniform(-1, 1, 2) * np.array([6.0, 3.5])
         look = sacc * smooth(span(tau, 0.25, 0.3)) + 1.2 * np.array([math.sin(tau * 53), math.sin(tau * 41)])
         if tau > 0:
-            amp = 0.03 * math.exp(-tau / 0.32) + 0.0035
-            n1 = math.sin(tau * 71.0) * 0.6 + math.sin(tau * 113.0 + 1.3) * 0.4
-            n2 = math.sin(tau * 83.0 + 0.7) * 0.6 + math.sin(tau * 131.0 + 2.1) * 0.4
+            esc = span(t, *T_ESCALATE) ** 2.2                   # gözler giderken sarsıntı giderek şiddetlenir
+            amp = 0.03 * math.exp(-tau / 0.32) + 0.0035 + 0.075 * esc
+            fq = 1.0 + 0.8 * esc
+            n1 = math.sin(tau * 71.0 * fq) * 0.6 + math.sin(tau * 113.0 * fq + 1.3) * 0.4
+            n2 = math.sin(tau * 83.0 * fq + 0.7) * 0.6 + math.sin(tau * 131.0 * fq + 2.1) * 0.4
             shake = (amp * n1, amp * n2 * 0.8)
-            rot = math.radians(1.6) * math.exp(-tau / 0.3) * math.sin(tau * 47.0)
-            zoom = 1.16 - 0.12 * ease_out(tau / 0.25) + 0.07 * smooth(span(tau, 0.2, T_CUT - T_EYES))
+            rot = math.radians(1.6) * math.exp(-tau / 0.3) * math.sin(tau * 47.0) + math.radians(4.0) * esc * math.sin(tau * 61.0)
+            zoom = 1.16 - 0.12 * ease_out(tau / 0.25) + 0.07 * smooth(span(tau, 0.2, T_CUT - T_EYES)) + 0.12 * esc
         else:
             # kapalıyken: çok yavaş yaklaşma ve hafif nefes
             k = t - T_EYES_SHOW
@@ -780,6 +897,13 @@ class Scene:
                     u_shake=tuple(float(x) for x in shake), u_rot=float(rot), u_zoom=float(zoom),
                     u_glow=float(glow), u_reveal=float(reveal), u_squint=float(squint),
                     u_lid_up=float(lid_up), u_lid_lo=float(lid_lo), u_show=float(show), u_near_vis=float(near_vis))
+
+    def _flash_eyes(self, t, t0):
+        """Bilinçaltı görüntü: ışık söndüğü 2 karede açık gözler karanlıktan belirip kaybolur."""
+        k = (t - t0) / 0.035
+        return dict(u_open=1.0, u_pupil=0.75, u_look=(0.0, 0.0), u_shake=(0.004 * math.sin(k * 9), 0.003),
+                    u_rot=0.0, u_zoom=1.35 + 0.1 * k, u_glow=0.55 * (1 - 0.4 * k), u_reveal=2.2, u_squint=0.0,
+                    u_lid_up=1.0, u_lid_lo=1.0, u_show=1.0, u_near_vis=1.0)
 
     def title(self, t):
         if t < T_TITLE:
@@ -814,6 +938,12 @@ class Scene:
         if 0 <= t - T_TITLE < 0.3:
             ca += 0.05 * math.exp(-(t - T_TITLE) / 0.1)
         fade = 1.0 - smooth(span(t, *T_END_FADE))
+        esc = span(t, *T_ESCALATE)
+        if esc > 0 and t < T_CUT:
+            ca += 0.16 * esc ** 1.5
+            strobe = 1.0 if math.sin(2 * math.pi * 17.0 * t) > -0.2 else 0.35
+            fade *= (1.0 - smooth((t - 12.55) / 0.4)) * (strobe if t > 12.6 else 1.0)
+            flash += 0.25 * esc ** 3 * (0.5 + 0.5 * math.sin(2 * math.pi * 11.0 * t))
         if T_CUT <= t < T_TITLE:
             fade = 0.0
         eyes_on = T_EYES_SHOW <= t < T_CUT
@@ -845,9 +975,11 @@ class Scene:
 
     def _init_renderer(self):
         from horror_gl import Renderer
+        from horror_texture import palette, stroke_texture
         import horror_eyes as he
         self.renderer = Renderer(self.width, self.height)
         self.renderer.set_text(*title_masks(self.width, self.height))
+        self.renderer.set_petal_texture(stroke_texture(), palette())
         aux, lids = he.eye_lids()
         self.renderer.set_eye_image(he.eye_image(), he.PUPILS, he.PUPIL_R, he.CENTER,
                                     he.ref_per_unit(self.width / self.height), aux, lids)
@@ -877,6 +1009,7 @@ class Scene:
                     petal_detach=[(fp.t0, float(fp.C0[0])) for fp in self.falling],
                     petal_land=[(fp.t_land, float(fp.land_pos[0])) for fp in self.falling],
                     tilt=T_TILT, dark=T_DARK, eyes_show=T_EYES_SHOW, twitch=T_EYES - 0.3, eyes=T_EYES,
+                    flashes=[a for a, _ in FLASHES], escalate=T_ESCALATE,
                     cut=T_CUT, title=T_TITLE, end_fade=T_END_FADE)
 
 

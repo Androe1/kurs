@@ -20,6 +20,11 @@ uniform float u_floor_glow;      // zemindeki kandan yansıyan kırmızı dolgu
 uniform float u_light_gain;      // kararma / titreme
 uniform float u_toon;            // boyama görünümü: yumuşak bantlı gölge, kenar fırça vurguları
 uniform mat3 u_view3;            // G-buffer için görüş uzayı dönüşümü
+uniform sampler2D u_petal_tex;       // referans çizimden döşenebilir fırça dokusu (yaprağın a, v koordinatlarıyla)
+uniform float u_petal_on;            // 0: doku yüklenmedi
+uniform float u_petal_amt;           // dokunun yaprak rengine etkisi
+uniform float u_petal_scale;         // birim uzunluk başına doku tekrarı (çizimle aynı fırça ölçeği)
+uniform vec3 u_pal[4];               // referans çizimin renk tonları (kırmızı = 1): gölge, orta, parlak, kenar vurgusu
 
 in vec3 v_pos;
 in vec3 v_nrm;
@@ -70,17 +75,26 @@ void main() {
     float liquid = clamp(v_extra.x, 0.0, 1.0);
     float wet = clamp(v_extra.y, 0.0, 1.0);
 
-    // ---- yaprak rengi: dipte neredeyse siyah bordo, uca doğru kan kırmızısı, kenarlar biraz açık
-    vec3 deep = vec3(0.035, 0.0004, 0.003);
-    vec3 mid = vec3(0.24, 0.0025, 0.016);
-    vec3 hi = vec3(0.40, 0.008, 0.032);
+    // ---- yaprak rengi (tonlar referans çizimden ölçülür): dipte bordo-siyah, uca doğru kan kırmızısı,
+    // kenarlar saf kırmızı
+    vec3 deep = 0.035 * u_pal[0];
+    vec3 mid = 0.24 * u_pal[1];
+    vec3 hi = 0.40 * u_pal[2];
     vec3 alb = mix(deep, mid, smoothstep(0.02, 0.5, v));
     float edge = smoothstep(0.7, 1.0, abs(a)) * smoothstep(0.3, 0.8, v) + smoothstep(0.82, 1.0, v / (1.0 - 0.3 * pow(abs(a), 2.2)));
     alb = mix(alb, hi, clamp(0.35 * edge + 0.25 * smoothstep(0.5, 1.0, v), 0.0, 1.0));
     // damarlar ve lekeler
     float vein = sin(a * 46.0 + 3.0 * vnoise(vec3(a * 3.0, v * 7.0, id * 3.7)));
     alb *= 0.96 + 0.04 * vein * smoothstep(0.05, 0.4, v);
-    alb *= 0.8 + 0.4 * vnoise(vec3(a * 5.0 + id * 1.3, v * 6.0, id * 7.1));
+    alb *= 0.88 + 0.24 * vnoise(vec3(a * 5.0 + id * 1.3, v * 6.0, id * 7.1));
+    // çizimden alınan fırça dokusu: yaprağın gerçek boyuyla (dış yapraklar içtekilerin ~2 katı) ölçeklenir,
+    // darbeler yaprak boyunca (dipten uca) uzanır; her yaprak dokunun başka bir yerinden başlar
+    if (u_petal_on > 0.5) {
+        vec2 size = vec2(0.43 + 0.5 * k, 0.30 + 0.30 * k);
+        vec2 tuv = vec2(a * 0.5, v) * size * u_petal_scale + fract(vec2(0.37, 0.61) * id + 0.13);
+        vec3 T = texture(u_petal_tex, tuv).rgb;
+        alb *= max(mix(vec3(1.0), T, u_petal_amt), vec3(0.15));
+    }
     // iç yüz (merkeze bakan) biraz daha koyu ve doygun
     alb *= front ? 1.0 : 0.85;
 
@@ -104,7 +118,7 @@ void main() {
     float band = (floor(wb) + smoothstep(0.3, 0.7, fract(wb))) / 3.0;
     wrap = mix(wrap, band, u_toon);
     vec3 diff = alb * wrap * sh;
-    vec3 trans = vec3(0.42, 0.012, 0.03) * max(-NdL, 0.0) * shBack * (1.0 - 0.8 * liquid) * mix(0.6, 1.0, v);
+    vec3 trans = 0.42 * u_pal[2] * max(-NdL, 0.0) * shBack * (1.0 - 0.8 * liquid) * mix(0.6, 1.0, v);
 
     vec3 H = normalize(L + V);
     float NdH = max(dot(n, H), 0.0);
@@ -120,10 +134,10 @@ void main() {
 
     // boyanmış parlama: speküler keskin kenarlı açık lekelere dönüşür
     spec = mix(spec, smoothstep(0.25, 0.45, spec) * 1.4 + spec * 0.3, u_toon);
-    vec3 col = lightC * (diff + trans + spec + sheen * vec3(0.5, 0.03, 0.09));
+    vec3 col = lightC * (diff + trans + spec + sheen * 0.5 * u_pal[3]);
     // yaprak kenarlarında açık kırmızı fırça vurgusu (referans çizimdeki gibi)
     float rimPaint = smoothstep(0.78, 0.98, abs(a)) * smoothstep(0.3, 0.85, v) + smoothstep(0.86, 1.0, v / (1.0 - 0.3 * pow(abs(a), 2.2)));
-    col += lightC * vec3(0.55, 0.05, 0.07) * clamp(rimPaint, 0.0, 1.0) * max(wrap, 0.15) * sh * u_toon * (1.0 - liquid) * 0.8;
+    col += lightC * 0.55 * u_pal[3] * clamp(rimPaint, 0.0, 1.0) * max(wrap, 0.15) * sh * u_toon * (1.0 - liquid) * 0.8;
 
     // ---- arkadan vuran uzak ışık: kenar ışığı
     float NdB = dot(n, u_back_dir);
@@ -140,7 +154,7 @@ void main() {
 
     // arka kontur ışığı: gülün silueti karanlıktan ayrılsın
     float rimF = pow(1.0 - NdV, 3.0) * smoothstep(-0.25, 0.55, dot(n, u_back_dir));
-    col += u_back_col * vec3(0.9, 0.08, 0.14) * rimF * 0.9 * mix(0.4, 1.0, ao) * u_light_gain;
+    col += u_back_col * 0.9 * u_pal[3] * rimF * 0.9 * mix(0.4, 1.0, ao) * u_light_gain;
 
     col *= mix(0.25, 1.0, ao);
     frag = vec4(max(col, 0.0), 1.0);

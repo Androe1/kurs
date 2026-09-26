@@ -85,9 +85,16 @@ def top_profile(a):
     return 1 - 0.3 * np.abs(a) ** 2.2
 
 
-def petal_surface(p, prm, na=NA, nb=NB):
-    """(nb, na, 3) konumlar + (nb, na, 2) uv (a: enine -1..1, v: boyuna 0..1)."""
+def petal_surface(p, prm, na=NA, nb=NB, flex=None):
+    """(nb, na, 3) konumlar + (nb, na, 2) uv (a: enine -1..1, v: boyuna 0..1).
+
+    flex (ikincil hareket, isteğe bağlı): {"open": taban açısına ek (rad), "curl": uç kıvrımına ek (rad),
+    "wave": yüzeyde tabandan uca akan dalganın genliği, "phase": dalganın evresi,
+    "edge": kenar titremesi genliği, "edge_phase": evresi}
+    """
     L, W = prm["L"], prm["W"]
+    if flex:
+        prm = dict(prm, alpha=prm["alpha"] + flex.get("open", 0.0), curl=prm["curl"] + flex.get("curl", 0.0))
     a = np.linspace(-1, 1, na)
     b = np.linspace(0, 1, nb)
     A, B = np.meshgrid(a, b)
@@ -117,6 +124,10 @@ def petal_surface(p, prm, na=NA, nb=NB):
     # kenarlarda hafif dalga (doğal düzensizlik)
     wv = p.wave
     Z = Z + 0.006 * W / 0.2 * np.abs(A) ** 2 * V * (np.sin(7 * A + wv[0]) + 0.6 * np.sin(13 * A + wv[1]))
+    if flex:
+        # rüzgarda titreme: tabandan uca akan eğilme dalgası + kenarların çırpınması
+        Z = Z + flex.get("wave", 0.0) * L * V ** 2 * np.sin(2 * np.pi * 1.3 * V - flex.get("phase", 0.0))
+        Z = Z + flex.get("edge", 0.0) * W * np.abs(A) ** 2 * V * np.sin(5.0 * A + flex.get("edge_phase", 0.0))
 
     # hafif burulma: kesit orta çizgi etrafında döner
     tw = prm["twist"] * V
@@ -160,10 +171,18 @@ class Rose:
         self.tri = grid_indices()
         self.tri_all = np.concatenate([self.tri + j * NA * NB for j in range(n)])
 
-    def petal(self, i, b):
+    def petal(self, i, b, flex=None):
         p = self.petals[i]
-        pos, uv = petal_surface(p, p.params(b))
+        pos, uv = petal_surface(p, p.params(b), flex=flex)
         return pos, grid_normals(pos), uv
+
+    def hinge(self, i, b):
+        """Yaprağın tabanı (gül uzayında) ve menteşe ekseni (teğet yön)."""
+        p = self.petals[i]
+        prm = p.params(b)
+        base = np.array([prm["r0"] * np.sin(p.phi), prm["h0"], prm["r0"] * np.cos(p.phi)])
+        axis = np.array([np.cos(p.phi), 0.0, -np.sin(p.phi)])
+        return base, axis
 
     def build(self, bloom):
         """bloom: skaler ya da yaprak başına dizi. (pos, nrm, uv, info) düz diziler + üçgenler."""

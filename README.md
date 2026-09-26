@@ -135,21 +135,23 @@ Linux'ta sunucuda çalıştırmak için `libegl1` gerekir (ekran kartı gerekmez
 Hazır video: [`output/horror_teaser.mp4`](output/horror_teaser.mp4)
 (1920x1080, 60 fps, H.264 + AAC stereo). 3B sahne, çizim / boyama görünümüyle render edilir:
 mürekkep konturları, bantlı boya gölgelendirme, Kuwahara boya filtresi, fırça dokusu.
-Görüntü de ses de kodla üretilir; tek hazır görsel, oyunun göz çizimidir (`assets/seytani_gozler.png`).
+Görüntü de ses de kodla üretilir; hazır görsel olarak yalnızca oyunun iki çizimi kullanılır:
+göz çizimi (`assets/seytani_gozler.png`) ve gül çizimi (`assets/gul_referans.png`; yaprakların
+fırça dokusu ve renk paleti buradan çıkarılır).
 
 | Saniye       | Görüntü                                                                                          | Ses                                                        |
 |--------------|--------------------------------------------------------------------------------------------------|------------------------------------------------------------|
-| 0.0 - 0.7    | Zifiri karanlık                                                                                  | kısık oda uğultusu, derinden bas                           |
-| 0.7          | Tepede spot ışık titreyerek yanar, huzmede toz süzülür                                           | ağır şalter "klank"ı, titremeyle kesilen lamba vızıltısı   |
-| 0.95 - 2.75  | Kan yukarıdan ağır ağır iner, ucunda damla şişer; iki damla karanlığa düşer                      | yapışkan gurultu; damlalar çok aşağıdan yankılanır         |
-| 2.75 - 5.05  | Damla titreyip döner, yüzeyinde sarmal sırtlar belirir; yapraklar sıvıdan çıkar ve üç vuruşta dıştan içe açılarak gül olur | tersten yükselen nefes, ıslak çıtırtılar, fısıltılar; her açılma vuruşu kalp atışı + yaylı darbesi |
-| 5.25         | İplik kopar, üst parça yaylanarak geri çekilir                                                   | çıt + esnek geri sekme                                     |
-| 5.25 - 8.35  | Gül düşen yaprak fiziğiyle sağa sola yatarak süzülür, kamera yayla takip eder; üstünden kan damlar | gülün hızıyla açılan, onunla sağa sola gezen hışırtı, hızlanan kalp |
-| 8.35         | Gül kan birikintisine değer: halka halka dalga, taç sıçraması; iki yaprak kopup savrulur ve sıvıya iner | BRAAM, alt frekans patlaması, sıçrama, halkaların parıltısı |
-| 9.85 - 10.95 | Işık titreyip söner, kamera yukarı, karanlığa bakar                                              | yükselen gerilim, hızlanan kalp, ölü sessizlik             |
-| 11.15 - 11.75 | Karanlıktan kapalı şeytani gözler belirir, bir kez seğirir                                      | derin hırıltı, içe çekilen nefes, ıslak tık                |
-| 11.75 - 12.95 | Kapaklar açılır; göz bebekleri büyükten iğne ucuna büzülür, kamera sarsılır; sonda gözler kısılır | dev vuruş: uyumsuz akor kümesi, metal çığlık, alt patlama |
-| 13.15 - 15.0 | "COMING SOON" ortadan dışa yanarak belirir, titrer, söner                                        | derin vuruş, metalik çınlama, karanlık uğultu              |
+| 0.0 - 0.7    | Zifiri karanlık                                                                                  | uzaktan esen boğuk rüzgar, derinden uğultu, tek kalp atışı |
+| 0.7          | Tepede spot ışık titreyerek yanar, huzmede toz süzülür                                           | büyük boş salonda yankılanan ağır, boğuk "tuum"; alçak lamba vızıltısı |
+| 0.95 - 2.75  | Kan yukarıdan ağır ağır iner, ucunda damla şişer; iki damla karanlığa düşer                      | yapışkan, alçak gıcırtılar; damlalar aşağıda, mağara yankısıyla |
+| 2.75 - 5.05  | Damla titreyip döner, yüzeyinde sarmal sırtlar belirir; yapraklar sıvıdan çıkar ve üç vuruşta dıştan içe açılarak gül olur | içe çekilen ters yankı, ters çevrilmiş fısıltılar, ıslak et sesleri; açılma vuruşları boğuk kalp atışı; koyu, uyumsuz çello kümesi |
+| 5.05 - 5.25  | İplik gerilir ve kopar, üst parça yaylanarak geri çekilir                                        | sıklaşan gıcırtı, boğuk "tok"                              |
+| 5.25 - 8.35  | Gül düşen yaprak fiziğiyle sağa sola yatarak süzülür; yaprakları hava akımıyla esner, dalgalanır, kenarları titrer | gülün hızıyla açılan, onunla sağa sola gezen boğuk rüzgar, hızlanan kalp |
+| 8.35         | Gül kan birikintisine değer: halka halka dalga, taç sıçraması; darbeyle zorlanan iki alt yaprak menteşesinden koparak kana yatar, dalgalarda yüzer | alt frekans düşüşü, karanlık braam, ağır boğuk sıçrama, yayılan dalganın uğultusu |
+| 9.3 - 10.95  | Işık titrer; titremenin karanlık karelerinde gözler bilinçaltı gibi iki kare görünür; kamera yukarı, karanlığa bakar | ters fısıltı ve çatırtı; karanlık yükselen gerilim, hızlanan kalp -> keskin kesme, ölü sessizlik |
+| 11.15 - 11.75 | Karanlıktan kapalı şeytani gözler belirir, bir kez seğirir                                      | perdesi düşük hırıltı, yavaş nefes, gözlere doğru kabaran ters yankı |
+| 11.75 - 12.95 | Kapaklar açılır; göz bebekleri büyükten iğne ucuna büzülür; sarsıntı giderek büyür, renkler ayrışır, ekran çakarak kararır | sub drop, bozulmuş braam, alçak metal sürtünmesi, boğuk çığlık; büyüyen kükreme -> kesme |
+| 13.15 - 15.0 | "COMING SOON" ortadan dışa yanarak belirir, titrer, söner                                        | en büyük vuruş (boğuk darbe + koyu yaylı küme + braam), rüzgar geri gelir, son bir kalp atışı |
 
 ```bash
 pip install -r requirements.txt
@@ -165,17 +167,32 @@ python horror_teaser.py --storyboard        # anahtar anlardan film şeridi
     yöne bağlı sürükleme, eklenen kütle, dönme sönümü) + çiçeğin ağır tabanından gelen safra torku;
     sağa sola süzülme kendiliğinden oluşur. Zaman ölçeği g ile ayarlanır (inişin anı sabit kalsın).
     Sıvıya değince temas kuvveti kademeli devreye girer; yatay hız söner, eğim burulma yayıyla düzelir.
-  - kopan yapraklar: yöne bağlı sürükleme ve yana itişle sallanarak düşer, sıvıda yüzer
+  - yaprakların ikincil hareketi: her yaprak, tabanında kütleli bir yay (menteşe); gülün ivmesinden gelen
+    eylemsizlik ve hava basıncıyla esner, dış yapraklar daha gevşek ve gecikmeli (follow-through,
+    overlapping action). Esneme yaprak boyunca ilerleyen dalga ve kenar titreşimi olarak da görünür.
+  - yaprak kopması: inişte en çok zorlanan iki alt yaprak, o anki esnemiş biçimleriyle menteşe ekseni
+    çevresinde yaylı bir dönmeyle kana yatar, sonra dışa kayar ve dalgaların üstünde yüzer
   - hareket `.claude/skills/character-physics/scripts/check_motion.py` ile doğrulandı (hız sıçraması
     ve ters sarsıntı yok)
 - `horror_rose.py` - prosedürel gül: 26 yaprak, orta çizgi + enine kesit integrali, altın açı dizilimi,
-  tomurcuk (damla) -> açık gül geçişi
+  tomurcuk (damla) -> açık gül geçişi; yaprak esnemesi (açılma, kıvrılma, dalga, kenar titreşimi)
+- `horror_texture.py` - gül çiziminden yaprak dokusu ve renk paleti: fırça darbeleri, kontur ve kenar
+  çizgilerinden uzak temiz yamalardan alınır, darbeler yaprak boyunca uzanacak şekilde döndürülüp dikişsiz
+  döşenen bir dokuya dizilir; palet, çizimin kırmızı piksellerinin parlaklık yüzdeliklerinden ölçülür
+  (render'daki gülün renk yüzdelikleri çizimdekilerle karşılaştırılarak ayarlandı)
 - `horror_eyes.py` - göz çizimi: göz bebekleri silinir (animasyonlu çizilir), kapak sınırları çizimden çıkarılır
 - `horror_gl.py` - moderngl render hattı: gölge haritası, 48 yönden ortam kapanması, zemin yansıması,
   hacimsel ışık, G-buffer, bloom, ton eşleme
 - `shaders/` - GLSL: gül yaprağı, kan sıvısı (raymarch), dalgalanan kan zemini, ışık huzmesi, toz,
   çizim görünümü (kontur + Kuwahara), gözler, yazı, son işlem
-- `horror_sound.py` - ses tasarımı (numpy ile sentez)
+- `horror_sound.py` - ses tasarımı (numpy ile sentez): karanlık ve boğuk palet (tiz, tonal ses yok);
+  atmosfer yatağı vuruşların altında kısılır (sidechain), büyük vuruşlardan önce kesme ve sessizlik.
+  Alt frekanslı vuruşlar hafifçe doyurulur ki telefon hoparlöründe de (150 Hz altını çalamaz) duyulsun
 - `fonts/Cinzel-*.ttf` - Cinzel yazı tipi (SIL Open Font License, bkz. `fonts/Cinzel-OFL.txt`)
+
+Kaynaklar: düşen yaprak fiziği için Andersen, Pesavento & Wang (2005), *Unsteady aerodynamics of
+fluttering and tumbling plates* (J. Fluid Mech.); ikincil hareket için animasyonun "follow-through ve
+overlapping action" ilkeleri; ses için korku fragmanı ses tasarımı yazıları (ters yankı, dinamik kontrast,
+rüzgar sentezi).
 
 Linux sunucuda `libegl1` gerekir (ekran kartı gerekmez, Mesa llvmpipe ile çalışır).
