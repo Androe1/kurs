@@ -21,6 +21,7 @@ Karakterler Roblox Studio'dan dışa aktarılan R6 modellerdir (characters/),
 rig.py ile gerçek 3B olarak pozlanıp çizilir. Hızlı hareketlerde hem hareket
 bulanıklığı hem de Spider-Verse tarzı kademeli izler (trail) vardır.
 """
+import json
 import math
 from pathlib import Path
 
@@ -64,6 +65,13 @@ LETTER_STYLE = [
 ]
 
 CREDIT = "Inspired by Glitch Productions"
+
+# Blender'da render edilen karakter katmanları (blender/anim.py): kare numarası pencere başına göre
+SEQ = {1: {"dir": ROOT / "renders" / "char1", "start": 215, "frames": 42, "contour": (0.604, 0.604, 0.604)},
+       2: {"dir": ROOT / "renders" / "char2", "start": 257, "frames": 49, "contour": GOLD}}
+CONTOUR_GROW = 12            # 1080p'de kontur genişliği (px)
+CONTOUR_SHIFT = (-3.5, 3.5)  # sol-aşağı kaydırma (px)
+RGB_SPLIT_SPEED = 0.012      # ekran genişliği / kare; bunun üstünde 2-3 px RGB ayrışması
 
 
 def clamp01(x):
@@ -143,6 +151,11 @@ class GlitchScene:
                             kind=rng.integers(2), rot=rng.uniform(0, 6.3), spin=rng.uniform(-1.2, 1.2),
                             depth=rng.uniform(0.4, 1.0), dark=rng.random() < 0.45) for _ in range(9)]
         self.glitch_rng = np.random.default_rng(seed + 1)
+        self.seq = {}
+        for n, info in SEQ.items():
+            meta = info["dir"] / "meta.json"
+            if meta.exists():
+                self.seq[n] = {**info, "meta": {int(k): v for k, v in json.loads(meta.read_text()).items()}, "cache": {}}
         self._logo_layout()
         self._credit_mask()
 
@@ -233,13 +246,21 @@ class GlitchScene:
     def _draw_shapes(self, c, t, accent, dark, t0, front):
         """Karakterin önünde/arkasında süzülen kareler ve altıgenler."""
         local = t - t0
+        n = 1 if t0 == T_CHAR1[0] else 2
+        _, meta = self._seq_frame(n, t) if n in self.seq else (None, None)
+        fronts = [k for k, s in enumerate(self.shapes) if s["depth"] > 0.75][:2]     # en fazla 2 ön plan parçası
         for k, s in enumerate(self.shapes):
-            if (s["depth"] > 0.75) != front:
+            if (k in fronts) != front:
                 continue
             x = s["x"] - 90 * local * s["depth"]
             y = s["y"] + 25 * math.sin(1.6 * local + k)
             rot = s["rot"] + s["spin"] * local
             r = s["r"] * (0.7 + 0.5 * s["depth"])
+            if front and meta:
+                # ön plandaki parça yüzün ya da gövde ortasının üstüne gelmesin
+                near = min(math.hypot(x - meta[key][0] * W, y - meta[key][1] * H) for key in ("face", "chest"))
+                if near < 230 + r:
+                    continue
             paint = skia.Paint(AntiAlias=True, Color4f=col(dark if s["dark"] else accent))
             if s["kind"]:
                 c.drawPath(hexagon(x, y, r, rot), paint)
@@ -297,6 +318,72 @@ class GlitchScene:
                 ImageFilter=skia.ImageFilters.Dilate(r, r),
                 ColorFilter=skia.ColorFilters.Blend(col(rgb).toColor(), skia.BlendMode.kSrcIn)))
         c.drawImage(img, x0, y0)
+        c.restore()
+
+    def _seq_frame(self, n, t):
+        info = self.seq.get(n)
+        if not info:
+            return None, None
+        f = int(round(t * self.fps * 60 / self.fps)) - info["start"]      # sahne karesi (60 fps) -> pencere karesi
+        if not 0 <= f <= info["frames"]:
+            return None, None
+        return f, info["meta"].get(f)
+
+    def _seq_image(self, n, f):
+        """Karakter karesini yükler; hızlı karelerde yalnızca karaktere 2-3 px RGB ayrışması uygular."""
+        info = self.seq[n]
+        if f in info["cache"]:
+            return info["cache"][f]
+        path = info["dir"] / f"{f:03d}.png"
+        if not path.exists():
+            info["cache"][f] = None
+            return None
+        a = skia.Image.open(str(path)).toarray(colorType=skia.kRGBA_8888_ColorType)
+        meta = info["meta"].get(f, {})
+        if meta.get("speed", 0) > RGB_SPLIT_SPEED:
+            d = int(round(2.5 * a.shape[1] / 1920))
+            r = np.roll(a, d, axis=1)
+            b_ = np.roll(a, -d, axis=1)
+            out = a.copy()
+            out[..., 0] = r[..., 0]
+            out[..., 2] = b_[..., 2]
+            out[..., 3] = np.maximum(a[..., 3], np.maximum(r[..., 3], b_[..., 3]))
+            a = out
+        img = skia.Image.fromarray(np.ascontiguousarray(a), colorType=skia.kRGBA_8888_ColorType)
+        info["cache"] = {k: v for k, v in info["cache"].items() if abs(k - f) < 3}   # bellek: yakın kareler
+        info["cache"][f] = img
+        return img
+
+    def _band_top(self, x, t, t0):
+        """Koyu zemin şeridinin üst kenarı (şerit _stage'deki ile aynı)."""
+        slide = 60 * (t - t0)
+        return H * 0.64 + slide * 0.2 + (x + 100) / (W + 200) * (H * 0.18)
+
+    def _draw_seq(self, c, t, n):
+        """Blender'da render edilmiş karakteri kontur ile çizer (tek katman, sol-aşağı kaymış)."""
+        f, meta = self._seq_frame(n, t)
+        if f is None:
+            return
+        img = self._seq_image(n, f)
+        if img is None:
+            return
+        info = self.seq[n]
+        c.save()
+        if meta and meta.get("mask_band"):
+            # 2. karakter şeridin ARKASINDAN yükselir: şeridin üst kenarının altı kırpılır
+            t0 = T_CHAR2[0] if n == 2 else T_CHAR1[0]
+            clip = poly([(-100, -100), (W + 100, -100), (W + 100, self._band_top(W + 100, t, t0)),
+                         (-100, self._band_top(-100, t, t0))])
+            c.clipPath(clip, doAntiAlias=True)
+        dst = skia.Rect(0, 0, W, H)
+        grow = CONTOUR_GROW * img.width() / 1920
+        c.save()
+        c.translate(*CONTOUR_SHIFT)
+        c.drawImageRect(img, dst, skia.SamplingOptions(skia.FilterMode.kLinear), skia.Paint(
+            ImageFilter=skia.ImageFilters.Dilate(grow, grow),
+            ColorFilter=skia.ColorFilters.Blend(col(info["contour"]).toColor(), skia.BlendMode.kSrcIn)))
+        c.restore()
+        c.drawImageRect(img, dst, skia.SamplingOptions(skia.FilterMode.kLinear))
         c.restore()
 
     # ------------------------------------------------------------ geçişler ve logo
@@ -421,12 +508,18 @@ class GlitchScene:
         elif t < T_CHAR1[1]:
             self._stage(c, t, GREY, BLACK, T_CHAR1[0])
             self._draw_shapes(c, t, GREY, BLACK, T_CHAR1[0], front=False)
-            self._draw_character(c, t, self.androe, char1_state, *T_CHAR1, BLACK, GREY, GREY)
+            if 1 in self.seq:
+                self._draw_seq(c, t, 1)
+            else:
+                self._draw_character(c, t, self.androe, char1_state, *T_CHAR1, BLACK, GREY, GREY)
             self._draw_shapes(c, t, GREY, BLACK, T_CHAR1[0], front=True)
         elif t < T_CHAR2[1]:
             self._stage(c, t, GOLD, BLACK, T_CHAR2[0])
             self._draw_shapes(c, t, GOLD, BLACK, T_CHAR2[0], front=False)
-            self._draw_character(c, t, self.official, char2_state, *T_CHAR2, BLACK, GOLD, GOLD_LIGHT)
+            if 2 in self.seq:
+                self._draw_seq(c, t, 2)
+            else:
+                self._draw_character(c, t, self.official, char2_state, *T_CHAR2, BLACK, GOLD, GOLD_LIGHT)
             self._draw_shapes(c, t, GOLD, BLACK, T_CHAR2[0], front=True)
         elif t < T_SWEEP[1]:
             self._draw_sweep(c, t)
