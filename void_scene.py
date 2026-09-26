@@ -1,8 +1,9 @@
 """Void Creations intro animasyonu - görsel sahne (referans videonun ilk 4 saniyesi).
 
 Akış (saniye):
-  0.36  Siyah ekranda silik bir teknik çizim zemini belirir: perspektifte
-        daireler, yatay taralı eğik bantlar, artı / çarpı işaretleri ve uzun
+  0.36  Siyah ekranda silik bir teknik çizim zemini belirir (özgün tasarım):
+        perspektifte ızgara, logonun eğiminden V şevronları ve eğik şerit
+        grupları, nokta matrisleri, cetveller, köşe işaretleri ve akan kesikli
         kılavuz çizgileri. Zemin yavaşça döner.
   0.40  Ekranın dışından çok hızlı gelen ince ışık çizgileri V logosunun
         kenarlarına ulaşır, köşelerde dönerek beş kopyanın konturunu çizer.
@@ -12,7 +13,7 @@ Akış (saniye):
         kopya hızlanan aralıklarla dolu beyaz yanıp söner; zemin kararır.
   2.20  Logo dolar, küçülerek sola kayar ve VOID'in V'si olur: sağındaki
         "OID CREATIONS" harfleri önce ince kontur olarak, hemen ardından eğik
-        bir dolgu cephesiyle soldan sağa belirir.
+        bir dolgu cephesiyle soldan sağa belirir. Logo ve yazı parlamasızdır.
   3.47  Logodaki eğimle aynı açıda bir silme soldan sağa her şeyi siler.
   3.73  Ekran siyah kalır, ses söner.
 
@@ -48,6 +49,7 @@ T_TURN = (1.48, 2.17)    # kamera logoya döner, kopyalar birleşir
 COLLAPSE = ((1.48, 0.0), (1.57, 0.035), (1.63, 0.08), (1.70, 0.16), (1.77, 0.31), (1.83, 0.52),
             (1.90, 0.68), (1.97, 0.78), (2.03, 0.83), (2.10, 0.89), (2.17, 1.0))
 T_BG_OUT = (1.50, 1.95)  # zemin kararır
+T_GLOW_OFF = (1.95, 2.17)  # parlama söner: logo ve yazı halesiz, keskin beyaz
 # Öndeki kopyanın dolu yanıp söndüğü aralıklar (referansla aynı kareler; aralar hızlanır)
 FLASHES = ((1.525, 1.558), (1.658, 1.725), (1.825, 1.858), (1.925, 1.958), (2.058, 2.092), (2.125, 2.158))
 T_SOLID = 2.195          # logo bundan sonra hep dolu
@@ -99,22 +101,29 @@ LETTERS = (
 N_POLY = ((10.0708, -1.0), (10.0708, 0.0), (10.3411, 0.0), (10.3411, -0.5354), (10.7080, 0.0),
           (10.9346, 0.0), (10.9346, -1.0), (10.6629, -1.0), (10.6629, -0.4667), (10.3016, -1.0))
 
-# Zemin: perspektifteki bir düzlem (u, v px). Değerler referanstaki yerleşime göre seçildi.
-RINGS = (  # (u, v, yarıçap, kendi eğimi, kendi dönüşü) - açılar derece
-    (-650, -330, 250, 0, 0), (-470, 170, 135, 25, 10), (560, 240, 390, -12, 0),
-    (840, -40, 250, 22, -30), (430, 540, 120, 0, 0), (-270, 580, 330, 15, 60),
-    (130, -600, 170, -20, 20), (-930, 430, 200, 0, 0),
+# Zemin: perspektifte duran bir teknik çizim düzlemi (u, v px). Özgün bir kompozisyon; öğeler
+# logonun dilinden türetildi: 18.3° eğimli V şevronları ve şerit grupları, zemin ızgarası,
+# nokta matrisleri, cetveller, köşe işaretleri ve kesikli kılavuz çizgileri.
+GRID_STEP, GRID_EXTENT = 160.0, (1440.0, 1120.0)   # ızgara aralığı, düzlemin yarı genişliği/yüksekliği
+CHEVRONS = (  # V şevron konturları: (u, v, yükseklik, dönüş derece, kesikli mi, parlaklık)
+    (0, 40, 980, 0, True, 0.10), (-860, -470, 360, -10, False, 0.17),
+    (800, 500, 470, 180, False, 0.14), (1010, -560, 230, 6, True, 0.16),
 )
-RIBBONS = (  # yatay taralı eğik bantlar: (başlangıç u, v, açı, uzunluk, genişlik)
-    (-1080, -1050, 47, 2900, 330), (-1500, 60, 47, 1500, 220), (380, 250, 47, 1400, 200),
+STRIPES = (  # eğik şerit grupları: (u, v, adet, çubuk yüksekliği, ters eğim mi)
+    (-1060, 140, 6, 120, False), (520, -300, 5, 92, True), (-220, 780, 8, 70, False),
 )
-HATCH_STEP = 24.0
-CROSS_GRIDS = (  # (u0, v0, sütun, satır, çarpı mı)
-    (-830, 170, 7, 5, False), (540, -270, 6, 4, True), (-560, -540, 4, 3, True),
+STRIPE_W, STRIPE_STEP = 18.0, 36.0
+DOTS = (  # nokta matrisleri: (u0, v0, sütun, satır)
+    (-700, 400, 10, 5), (620, -800, 8, 4), (1060, 120, 5, 7),
 )
-CROSS_STEP, CROSS_SIZE = 50.0, 9.0
-GUIDES = (  # ekran düzleminde uzun kılavuz çizgileri: (açı, merkezden uzaklık)
-    (-28, -260), (62, -700), (-74, 520), (30, 210), (-35, 330), (80, 650), (12, -430),
+DOT_STEP, DOT_SIZE = 30.0, 5.5
+RULERS = ((-1350, 600, 1350, 600), (1180, -1000, 1180, 900), (-1260, -780, 160, -780))  # (u0, v0, u1, v1)
+RULER_STEP = 40.0         # her 5. çentik uzun
+BRACKETS = (  # köşe işaretleri: çerçevelenen dikdörtgen (u0, v0, u1, v1) ve kol uzunluğu
+    (-480, -340, 480, 340, 70), (-1190, -650, -770, -310, 40), (830, 640, 1250, 920, 40),
+)
+GUIDES = (  # ekran düzleminde kesikli kılavuz çizgileri: (açı, merkezden uzaklık)
+    (90 - 18.3, -560), (90 + 18.3, 640), (-7, -310), (5, 400),
 )
 
 SHUTTER = 0.5            # hareket bulanıklığı: kare süresinin yarısı
@@ -248,47 +257,74 @@ def upsample2(a):
 # ---------------------------------------------------------------- zemin
 
 class Backdrop:
-    """Perspektifte duran silik teknik çizim düzlemi; kamerayla birlikte döner."""
+    """Perspektifte duran silik teknik çizim düzlemi; kamerayla birlikte döner.
+
+    Özgün bir kompozisyondur: zemin ızgarası, logonun 18.3° eğiminden türeyen V şevronları
+    ve eğik şerit grupları, veri gibi yanıp duran nokta matrisleri, cetveller, köşe
+    işaretleri ve kesikli kılavuz çizgileri.
+    """
 
     def __init__(self):
-        self.rings = []
-        for u, v, r, tilt, spin in RINGS:
-            a = np.linspace(0, 2 * np.pi, 121)
-            circle = np.column_stack([r * np.cos(a), r * np.sin(a), np.zeros_like(a)])
-            local = rot_z(math.radians(spin)) @ rot_x(math.radians(tilt))
-            self.rings.append(circle @ local.T + [u, v, 0])
+        tan = math.tan(SLANT)
+        z = np.zeros
 
-        segs, alphas = [], []
-        for u0, v0, ang, length, width in RIBBONS:
-            d = np.array([math.cos(math.radians(ang)), math.sin(math.radians(ang))])
+        # zemin ızgarası: düzlemdeki doğrular perspektifte de doğrudur, iki uç yeter
+        gu, gv = GRID_EXTENT
+        grid = [[[u, -gv, 0], [u, gv, 0]] for u in np.arange(-gu, gu + 1, GRID_STEP)]
+        grid += [[[-gu, v, 0], [gu, v, 0]] for v in np.arange(-gv, gv + 1, GRID_STEP)]
+        self.grid = np.array(grid, float)
+
+        # V şevronları: logonun kollarıyla aynı eğimde, düz tabanlı kalın V konturu
+        shape = np.array([(-0.5, -0.5), (-0.22, -0.5), (0.0, -0.5 + 0.22 / tan), (0.22, -0.5),
+                          (0.5, -0.5), (0.5 - tan, 0.5), (tan - 0.5, 0.5)])
+        self.chevrons = []
+        for u, v, size, rot, dashed, alpha in CHEVRONS:
+            c, si = math.cos(math.radians(rot)), math.sin(math.radians(rot))
+            pts = (shape * size) @ np.array([[c, si], [-si, c]]) + [u, v]
+            self.chevrons.append((np.column_stack([pts, z(len(pts))]), dashed, alpha))
+
+        # eğik şerit grupları: logonun sol (ya da sağ) kolu gibi paralelkenar çubuklar
+        bars = []
+        for u, v, count, h, mirror in STRIPES:
+            lean = -h * tan if mirror else h * tan
+            for i in range(count):
+                x = u + i * STRIPE_STEP
+                bars.append([[x, v - h / 2, 0], [x + STRIPE_W, v - h / 2, 0],
+                             [x + STRIPE_W + lean, v + h / 2, 0], [x + lean, v + h / 2, 0]])
+        self.bars = np.array(bars, float)
+
+        # nokta matrisleri: satır satır farklı parlaklık, bazı noktalar boş (veri gibi)
+        rng = np.random.default_rng(21)
+        dots, level = [], []
+        for u0, v0, cols, rows in DOTS:
+            for j in range(rows):
+                row_level = rng.uniform(0.35, 1.0)
+                for i in range(cols):
+                    if rng.random() < 0.85:
+                        dots.append([u0 + i * DOT_STEP, v0 + j * DOT_STEP, 0])
+                        level.append(row_level)
+        self.dots, self.dot_level = np.array(dots, float), np.array(level)
+        self.dot_phase = rng.uniform(0, 2 * np.pi, len(dots))
+
+        # cetveller: uzun çizgi ve dik çentikler (her 5. çentik uzun)
+        lines, ticks = [], []
+        for u0, v0, u1, v1 in RULERS:
+            a0, a1 = np.array([u0, v0], float), np.array([u1, v1], float)
+            length = np.hypot(*(a1 - a0))
+            d = (a1 - a0) / length
             n = np.array([-d[1], d[0]])
-            a0 = np.array([u0, v0])
-            quad = [a0 - n * width / 2, a0 + d * length - n * width / 2,
-                    a0 + d * length + n * width / 2, a0 + n * width / 2]
-            ys = [q[1] for q in quad]
-            for y in np.arange(math.ceil(min(ys) / HATCH_STEP) * HATCH_STEP, max(ys), HATCH_STEP):
-                xs = []
-                for p, q in zip(quad, quad[1:] + quad[:1]):
-                    if (p[1] - y) * (q[1] - y) < 0:
-                        xs.append(p[0] + (q[0] - p[0]) * (y - p[1]) / (q[1] - p[1]))
-                if len(xs) >= 2:
-                    x0, x1 = min(xs), max(xs)
-                    mid = (np.array([(x0 + x1) / 2, y]) - a0) @ d / length
-                    segs.append([[x0, y, 0], [x1, y, 0]])
-                    alphas.append(math.sin(math.pi * clamp01(mid)) ** 0.7)   # bant uçlarında söner
-        self.hatch = np.array(segs, float)
-        self.hatch_alpha = np.array(alphas)
+            lines.append([[*a0, 0], [*a1, 0]])
+            for k, dist in enumerate(np.arange(0, length + 1, RULER_STEP)):
+                q = a0 + d * dist
+                ticks.append([[*q, 0], [*(q + n * (24 if k % 5 == 0 else 10)), 0]])
+        self.ruler_lines, self.ruler_ticks = np.array(lines, float), np.array(ticks, float)
 
-        crosses = []
-        for u0, v0, cols, rows, diagonal in CROSS_GRIDS:
-            for i in range(cols):
-                for j in range(rows):
-                    x, y, s = u0 + i * CROSS_STEP, v0 + j * CROSS_STEP, CROSS_SIZE
-                    if diagonal:
-                        crosses += [[[x - s, y - s, 0], [x + s, y + s, 0]], [[x - s, y + s, 0], [x + s, y - s, 0]]]
-                    else:
-                        crosses += [[[x - s, y, 0], [x + s, y, 0]], [[x, y - s, 0], [x, y + s, 0]]]
-        self.crosses = np.array(crosses, float)
+        # köşe işaretleri: dikdörtgenlerin dört köşesinde L biçimli çizgiler
+        corners = []
+        for u0, v0, u1, v1, arm in BRACKETS:
+            for x, y, sx, sy in ((u0, v0, 1, 1), (u1, v0, -1, 1), (u1, v1, -1, -1), (u0, v1, 1, -1)):
+                corners.append([[x + sx * arm, y, 0], [x, y, 0], [x, y + sy * arm, 0]])
+        self.brackets = np.array(corners, float)
 
     @staticmethod
     def pose(t):
@@ -311,30 +347,71 @@ class Backdrop:
         if alpha <= 0.003:
             return
         rot, offset, roll = self.pose(t)
-        ring_paint = stroke(1.8, 0.24 * alpha)
-        for ring in self.rings:
-            c.drawPath(polyline(self.project(ring, rot, offset)), ring_paint)
 
-        hatch = self.project(self.hatch, rot, offset)
-        for (p, q), a in zip(hatch, self.hatch_alpha):
-            if a > 0.02:
-                c.drawLine(*p, *q, stroke(3.0, 0.17 * alpha * a))
+        def project(points):
+            return self.project(points, rot, offset)
 
-        cross_paint = stroke(2.2, 0.3 * alpha)
-        path = skia.Path()
-        for p, q in self.project(self.crosses, rot, offset):
-            path.moveTo(*p)
-            path.lineTo(*q)
-        c.drawPath(path, cross_paint)
+        def segments(pairs):
+            path = skia.Path()
+            for p, q in project(pairs):
+                path.moveTo(*p)
+                path.lineTo(*q)
+            return path
 
-        guide_paint = stroke(1.5, 0.2 * alpha)
+        # ızgara: ekranın ortasından kenarlara doğru söner
+        grid = stroke(1.3)
+        grid.setShader(skia.GradientShader.MakeRadial(
+            (CX, CY), 1150, [skia.Color4f(1, 1, 1, 0.12), skia.Color4f(1, 1, 1, 0.055),
+                             skia.Color4f(1, 1, 1, 0)], [0.0, 0.55, 1.0]))
+        grid.setAlphaf(alpha)
+        c.drawPath(segments(self.grid), grid)
+
+        bars = skia.Path()
+        for quad in project(self.bars):
+            bars.addPath(polyline(quad, closed=True))
+        c.drawPath(bars, fill(0.1 * alpha))
+
+        dash = skia.DashPathEffect.Make([26.0, 14.0], 0.0)
+        for pts, dashed, level in self.chevrons:
+            paint = stroke(1.7, level * alpha)
+            if dashed:
+                paint.setPathEffect(dash)
+            c.drawPath(polyline(project(pts), closed=True), paint)
+
+        c.drawPath(segments(self.ruler_lines), stroke(1.4, 0.18 * alpha))
+        c.drawPath(segments(self.ruler_ticks), stroke(1.4, 0.24 * alpha))
+
+        # noktalar veri gibi yavaşça yanıp söner; perspektifle birlikte küçülür
+        q = self.dots @ rot.T + offset
+        scale = FOCAL / np.maximum(FOCAL + q[:, 2], 60.0)
+        xy = np.stack([CX + q[:, 0] * scale, CY + q[:, 1] * scale], -1)
+        blink = self.dot_level * (0.65 + 0.35 * np.sin(9.0 * t + self.dot_phase))
+        for lo in (0.0, 0.33, 0.66):                      # üç parlaklık kümesi, tek çizim
+            sel = (blink >= lo) & (blink < lo + 0.34)
+            path = skia.Path()
+            for (x, y), k in zip(xy[sel], scale[sel]):
+                r = DOT_SIZE * k / 2
+                path.addRect(skia.Rect(x - r, y - r, x + r, y + r))
+            c.drawPath(path, fill((lo + 0.17) * 0.42 * alpha))
+
+        corners = skia.Path()
+        for a, b, d in project(self.brackets):
+            corners.moveTo(*a)
+            corners.lineTo(*b)
+            corners.lineTo(*d)
+        corner_paint = stroke(2.0, 0.32 * alpha)
+        corner_paint.setStrokeCap(skia.Paint.kSquare_Cap)
+        c.drawPath(corners, corner_paint)
+
+        guide = stroke(1.4, 0.15 * alpha)
+        guide.setPathEffect(skia.DashPathEffect.Make([30.0, 18.0], 40.0 * t))   # çizgiler akar
         drift = np.array([offset[0] * 0.6, offset[1] * 0.6])
         for ang, dist in GUIDES:
             a = math.radians(ang) + roll * 1.4
             d = np.array([math.cos(a), math.sin(a)])
             n = np.array([-d[1], d[0]])
             p = np.array([CX, CY]) + n * dist + drift
-            c.drawLine(*(p - d * 2600), *(p + d * 2600), guide_paint)
+            c.drawLine(*(p - d * 2600), *(p + d * 2600), guide)
 
 
 # ---------------------------------------------------------------- logo + yazı
@@ -602,21 +679,27 @@ class VoidScene:
                     self.draw(c, tj, t)   # yanıp sönme karenin kendi zamanına bağlı: keskin kalır
                 acc += np.take(self.to_linear, self.surface.toarray(colorType=skia.kRGBA_8888_ColorType)[..., 0])
             grey = np.take(self.to_srgb, (np.sqrt(np.minimum(acc / n, 1.0)) * 4095 + 0.5).astype(np.uint16))
-        return self._bloom(grey)
+        return self._bloom(grey, self.glow_amount(t))
 
-    def _bloom(self, grey):
+    @staticmethod
+    def glow_amount(t):
+        """Parlama miktarı: çizgi ve kopya evresinde tam; logo ve yazıda yok (keskin beyaz).
+        Kopyalar birleşirken yumuşakça söner ki yazıya geçişte sıçrama olmasın."""
+        return 1.0 - progress(t, T_GLOW_OFF, ease_in_out_sine)
+
+    def _bloom(self, grey, amount=1.0):
         """Işık halesi: bulanık kopyalar yarım çözünürlükte, ondalık hassasiyetle hesaplanır
         ve tek seferde 8 bite çevrilir (koyu gradyanlarda bantlaşma olmasın diye hafif titreşimle)."""
-        if not grey.any():
+        if amount <= 0.0 or not grey.any():
             return np.repeat(grey[..., None], 3, -1)
         g = grey.astype(np.float32)
         h, w = g.shape
         small = np.pad(g, ((0, h % 2), (0, w % 2)), mode="edge")
         small = small.reshape(small.shape[0] // 2, 2, small.shape[1] // 2, 2).mean((1, 3))
         halo = np.zeros_like(small)
-        for sigma, amount in BLOOM:
-            halo += amount * gaussian(small, sigma * self.k / 2)
-        out = g + upsample2(halo)[:h, :w]
+        for sigma, weight in BLOOM:
+            halo += weight * gaussian(small, sigma * self.k / 2)
+        out = g + amount * upsample2(halo)[:h, :w]
         out += self.rng.random(out.shape, np.float32) - 0.5
         out = np.clip(out + 0.5, 0, 255).astype(np.uint8)
         return np.repeat(out[..., None], 3, -1)
@@ -646,7 +729,7 @@ class VoidScene:
         for x in lk.letter_x:                  # dolgu cephesi harfin ortasından geçtiği an
             t = float(ts[np.argmax(fill >= x)])
             letters.append((t, pan(t, x)))
-        return dict(duration=DURATION, snakes=snakes, turn=T_TURN,
+        return dict(duration=DURATION, boot=frame(T_BG_IN[0]), snakes=snakes, turn=T_TURN,
                     flashes=[(frame(a), frame(b)) for a, b in FLASHES], solid=frame(T_SOLID),
                     reveal=[(float(t), pan(t, lk.fronts(t)[0])) for t in np.linspace(*T_REVEAL, 24)],
                     letters=letters,

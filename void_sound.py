@@ -1,204 +1,247 @@
-"""Void Creations intro animasyonu - ses tasarımı.
+"""Void Creations intro animasyonu - dijital ses tasarımı.
 
-Zemin referanstaki gibi vuruşsuz, sessizlikten kabaran koyu bir pad'dir; üzerine
-ekrandaki her olayla aynı karede duyulan efektler gelir. Tüm sesler numpy ile
-sentezlenir, hazır ses kullanılmaz. Zamanlar ve ekrandaki konumlar
-void_scene.VoidScene.events()'ten gelir.
+Yumuşak pad yok: tüm sesler net, keskin ve dijitaldir. Bant sınırlı kare dalga
+bipler, FM "ping"ler, bit derinliği düşürülmüş (bitcrush) glitch'ler, basamaklı
+(yarım ton yarım ton) yükselen dizi ve sıkı alt vuruşlar; zarflar milisaniye
+hassasiyetinde, yankı çok kısa. Ton Si♭ minör pentatonik (Si♭ Re♭ Mi♭ Fa La♭).
+Tüm sesler numpy ile sentezlenir; zamanlar ve ekrandaki konumlar
+void_scene.VoidScene.events()'ten gelir, her ses görüntüdeki olayla aynı karede başlar.
 
-  ışık çizgileri gelir   -> geldiği yandan logoya doğru süzülen hava sesi
-  bir kopya kapanır      -> camsı ince bir "tık"
-  kopyalar birleşir      -> tonda (Si♭) yükselen gerilim
-  logo yanıp söner       -> her flaşta kısa, cızırtılı bir elektrik çıtırtısı ve alçak vuruş
-  logo dolar (2.2)       -> derin vuruş, çatırtı ve parıltı; bas tam güce çıkar
-  harfler belirir        -> cepheyle soldan sağa giden hışırtı, her harfe ince bir nota
-  silme (3.47)           -> soldan sağa hızlı hava sesi; akor Sol minöre döner, ses söner
-
-Akorlar tamamen uyumludur: Si♭(add9) -> Sol minör(add9). Bas temiz bir alt sinüstür
-(testere dişinin üst harmonikleri pad'deki notalarla yarım ton sürtüşmesin diye);
-notalar, tıklar ve parıltılar da aynı tondadır (Si♭ majör pentatonik).
+  zemin belirir (0.36)   -> "sistem açılıyor": alçak tık ve iki kısa bip
+  ışık çizgileri gelir   -> geldiği yandan dijital lazer: aşağı süzülen metalik ton
+  bir kopya kapanır      -> kare dalga onay biplerinden yükselen bir dizi
+  arka planda            -> hesaplama gibi rastgele tiz veri bipleri, alçak elektrik uğultusu
+  kopyalar birleşir      -> hızlanan basamaklı kare dalga dizisi + ezik gürültü riser
+  logo yanıp söner       -> flaş süresince keskin kesilmiş glitch patlaması
+  logo dolar (2.2)       -> sıkı dijital vuruş, ezik şaklama ve FM ping
+  harfler belirir        -> her harfe dijital "yazma" tıkı, cepheyi izleyen tarayıcı sesi
+  silme (3.47)           -> soldan sağa ezik süpürme, "kapanma" (ton aşağı çöker), son tık
 """
 import numpy as np
 
-from sound import SR, TAU, Mixer, band, convolve, glide, peak, reverb_ir, span, sweep_band
-
-CHORD_1 = (174.61, 233.08, 293.66, 349.23, 523.25, 587.33)   # Fa3 Si♭3 Re4 Fa4 Do5 Re5 = Si♭(add9)
-CHORD_2 = (196.00, 233.08, 293.66, 392.00, 440.00, 587.33)   # Sol3 Si♭3 Re4 Sol4 La4 Re5 = Solm(add9)
-VOICE_DB = (-5, -3, -2, -4, -8, -7)                          # seslerin seviyeleri (iki akorda aynı sırada)
-BASS = (58.27, 49.00)                                        # Si♭1 -> Sol1
-# Si♭ majör pentatonik (Si♭ Do Re Fa Sol): harf başına bir nota, tıklar ve parıltılar
-BELLS = (932.33, 1046.50, 1174.66, 1396.91, 1567.98, 1864.66, 2093.00, 2349.32, 2793.83, 3135.96,
-         3729.31, 4186.01)
-TICKS = (1396.91, 1864.66, 2093.00, 2349.32)
-
-# Pad'in kabarması (saniye, dB): referanstaki müziğin seviye eğrisi
-PAD_LEVEL = ((0.0, -70), (0.2, -45), (0.4, -33), (0.6, -24), (0.8, -18), (1.0, -15), (1.2, -12.5),
-             (1.4, -10.5), (1.6, -8), (1.8, -5.5), (2.0, -3.5), (2.2, -2.5), (2.6, -1), (3.4, 0), (4.4, 0))
-PAD_CUTOFF = ((0.0, 700), (0.4, 1100), (1.2, 2000), (2.2, 2800), (4.4, 2800))   # Hz
+from sound import SR, TAU, Mixer, band, convolve, glide, peak, reverb_ir, span
 
 
-# ---------------------------------------------------------------- yardımcılar
-
-def db(x):
-    return 10 ** (np.asarray(x, float) / 20)
-
-
-def envelope(t, table, smooth=0.03):
-    """dB tablosundan genlik eğrisi; köşeler kısa bir ortalama ile yumuşatılır."""
-    ts, vs = np.array(table, float).T
-    env = db(np.interp(t, ts, vs))
-    k = int(smooth * SR) | 1
-    padded = np.concatenate([np.full(k // 2, env[0]), env, np.full(k // 2, env[-1])])
-    return np.convolve(padded, np.ones(k) / k, mode="valid")
+def note(name_octave):
+    """Nota adı -> frekans (La4 = 440 Hz). Örn. 'Bb5', 'Db7'."""
+    names = {"C": 0, "Db": 1, "D": 2, "Eb": 3, "E": 4, "F": 5, "Gb": 6, "G": 7, "Ab": 8, "A": 9, "Bb": 10, "B": 11}
+    name, octave = name_octave[:-1], int(name_octave[-1])
+    return 440.0 * 2 ** ((names[name] + 12 * (octave + 1) - 69) / 12)
 
 
-def panned(left, right, pan):
-    """İki kanalı (ya da aynı sinyali) sabit güçte, zamanla değişebilen konuma yerleştirir."""
+
+
+LOCK_NOTES = [note(n) for n in ("Bb5", "Db6", "Eb6", "F6", "Ab6", "Bb6", "Db7", "Eb7", "F7", "Ab7")]
+CHATTER = [note(n) for n in ("Bb6", "Db7", "Eb7", "F7", "Ab7", "Bb7", "Db8", "Eb8")]
+ARP = [note(n) for n in ("Bb3", "Db4", "Eb4", "F4", "Ab4", "Bb4", "Db5", "Eb5", "F5", "Ab5",
+                         "Bb5", "Db6", "Eb6", "F6", "Ab6", "Bb6")]
+TYPE_NOTES = [note(n) for n in ("F7", "Ab7", "Bb7", "Db8")]
+HUM = note("Bb1")
+
+
+# ---------------------------------------------------------------- dijital yapı taşları
+
+def square(phase, fmax, top=12000.0):
+    """Bant sınırlı kare dalga (tek harmonikler): net ama aliasing'siz."""
+    out = np.zeros_like(phase)
+    for k in range(1, max(int(top / fmax), 1) + 1, 2):
+        out += np.sin(k * phase) / k
+    return out * (4 / np.pi)
+
+
+def crush(x, bits):
+    """Bit derinliğini düşürür: dijital, basamaklı genlik."""
+    q = 2 ** (bits - 1)
+    return np.round(x * q) / q
+
+
+def hold(x, k):
+    """Örnekleme hızını düşürür (her k örnekte bir değer): dijital pürüz."""
+    return np.repeat(x[::k], k)[:len(x)]
+
+
+def gate(t, attack, length, release=0.0015):
+    """Keskin kapı: attack ile açılır, length boyunca tam, release ile kapanır (saniye)."""
+    return np.clip(t / attack, 0, 1) * np.clip((length - t) / release, 0, 1)
+
+
+def pluck(t, attack, decay):
+    """Keskin başlayıp üstel sönen zarf."""
+    return np.clip(t / attack, 0, 1) * np.exp(-t / decay)
+
+
+def panned(sig, pan):
+    """Sabit güçte stereo konum (pan sabit ya da zamanla değişen dizi)."""
     p = (np.clip(pan, -1, 1) + 1) * np.pi / 4
-    return np.stack([left * np.cos(p), right * np.sin(p)], -1)
+    return np.stack([sig * np.cos(p), sig * np.sin(p)], -1)
 
 
-def air(n, fc, q, rng):
-    """İki kanallı (ilintisiz) band geçiren gürültü; merkez frekansı zamanla değişir."""
-    return [sweep_band(rng.standard_normal(n), fc, q) for _ in range(2)]
+# ---------------------------------------------------------------- sesler
+
+def boot(mx, t0):
+    """Zemin belirirken: alçak tık ve iki kısa kare dalga bip ("sistem açılıyor")."""
+    t = span(0.3)
+    thump = np.sin(glide(50 + 70 * np.exp(-t / 0.012))) * pluck(t, 0.0005, 0.04)
+    mx.add(thump, t0, gain=0.5, reverb=0.05)
+    for dt, f in ((0.0, note("Bb5")), (0.07, note("F6"))):
+        tb = span(0.05)
+        blip = square(TAU * f * tb, f) * gate(tb, 0.0005, 0.038)
+        mx.add(blip, t0 + dt, gain=0.075, reverb=0.1)
 
 
-def ducking(t, hits, depth, attack=0.004, release=0.12):
-    """Vuruş anlarında kısılma kazancı: hits = [(başlangıç, süre)], her vuruşta depth kadar iner."""
-    g = np.ones(len(t))
-    for t0, hold in hits:
-        x = t - t0
-        shape = np.where(x < 0, 0.0, np.where(x < attack, x / attack,
-                         np.where(x < attack + hold, 1.0, np.exp(-(x - attack - hold) / release))))
-        g *= 1 - depth * shape
-    return g
-
-
-# ---------------------------------------------------------------- müzik yatağı
-
-def saw_voice(t, f0, fc, rng, top=6000.0):
-    """Yumuşak testere dişi (toplamalı): harmonikler 24 dB/oktav alçak geçirenden geçer."""
-    out = np.zeros(len(t))
-    for h in range(1, int(top / f0) + 1):
-        gain = 1 / np.sqrt(1 + (f0 * h / fc) ** 8)
-        out += gain / h * np.sin(TAU * f0 * h * t + rng.uniform(0, TAU))
-    return out
-
-
-def pad(t, change, rng):
-    """Si♭(add9) -> Solm(add9): her nota üç hafif akort kaymış testere + sinüs gövdesi."""
-    ts, fs = np.array(PAD_CUTOFF, float).T
-    fc = np.exp(np.interp(t, ts, np.log(fs)))
-    x = 0.5 - 0.5 * np.cos(np.pi * np.clip((t - change + 0.06) / 0.14, 0, 1))   # 0 -> 1 akor geçişi
-    out = np.zeros((len(t), 2))
-    for chord, weight in ((CHORD_1, 1 - x), (CHORD_2, x)):
-        for f, level in zip(chord, VOICE_DB):
-            for cents, pan_ in ((-6, -0.6), (0, 0.0), (6, 0.6)):
-                v = saw_voice(t, f * 2 ** (cents / 1200), fc, rng) + 0.6 * np.sin(TAU * f * t + rng.uniform(0, TAU))
-                out += db(level) * weight[:, None] * panned(v, v, pan_)
-    return out / np.abs(out).max()
-
-
-def bass(t, change):
-    """Temiz alt bas: sinüs + oktavı + hafif doyurma (tek harmonikler akorun beşlisi ve üçlüsü)."""
-    out = np.zeros(len(t))
-    for f0, gate in ((BASS[0], np.clip((change + 0.03 - t) / 0.06, 0, 1)),
-                     (BASS[1], np.clip((t - change) / 0.04, 0, 1))):
-        out += (np.sin(TAU * f0 * t) + 0.3 * np.sin(TAU * 2 * f0 * t)) * gate
-    out = np.tanh(1.4 * out) / np.tanh(1.4)
-    return np.stack([out, out], -1)
-
-
-# ---------------------------------------------------------------- efektler
-
-def swish(mx, t0, arrive, pan0, rng, gain):
-    """Işık çizgisi: geldiği yandan logoya doğru süzülen hava sesi; zirvesi logoya değdiği an."""
-    rise = max(arrive - t0, 0.03)
-    t = span(rise + 0.22)
-    u = np.clip(t / rise, 0, 1)
-    env = np.where(t < rise, u ** 2.2, np.exp(-(t - rise) / 0.06)) * np.clip((t[-1] - t) / 0.01, 0, 1)
-    left, right = air(len(t), 900 * 4.5 ** u, 1.3, rng)
-    sig = panned(left, right, 0.85 * pan0 * (1 - u))
-    mx.add(sig / np.abs(sig).max() * env[:, None], t0, gain=gain, reverb=0.2)
-
-
-def tick(mx, t0, f, pan, gain):
-    """Bir kopyanın konturu kapandığında: camsı ince tık."""
-    t = span(0.15)
-    s = np.sin(TAU * f * t) * np.exp(-t / 0.02) + 0.35 * np.sin(TAU * 2.76 * f * t) * np.exp(-t / 0.007)
-    mx.add(s * (1 - np.exp(-t / 0.0006)), t0, gain=gain, pan=pan, reverb=0.35)
-
-
-def riser(mx, t0, t1, flashes, rng, gain):
-    """Kopyalar birleşirken: tizleşen hava ve Si♭2'den Si♭4'e çıkan ton; logo dolarken kesilir.
-    Logo her yanıp söndüğünde riser da kesilir: ses, flaşlarla aynı ritimde titrer."""
-    dur = t1 - t0
+def laser(mx, t0, arrive, pan0, rng, gain):
+    """Işık çizgisi: geldiği yandan logoya doğru aşağı süzülen metalik FM tonu; logoya değince tık."""
+    dur = max(arrive - t0, 0.04)
     t = span(dur)
     u = t / dur
-    env = u ** 2.4 * np.clip((dur - t) / 0.004, 0, 1)
-    env *= ducking(t0 + t, [(a, b - a) for a, b in flashes], 0.75, release=0.03)
-    left, right = air(len(t), 350 * 18 ** (u ** 1.2), 1.6, rng)
-    noise = panned(left, right, np.zeros(len(t)))
-    mx.add(noise / np.abs(noise).max() * env[:, None], t0, gain=gain, reverb=0.2)
-    ph = glide(116.54 * 4 ** (u ** 1.5))
-    tone = (np.sin(ph) + 0.4 * np.sin(2 * ph) + 0.2 * np.sin(3 * ph)) * env
-    mx.add(peak(tone), t0, gain=0.45 * gain, reverb=0.25)
+    f = 4200 * (1400 / 4200) ** u                           # 4.2 kHz -> 1.4 kHz
+    ph = glide(f)
+    fm = np.sin(ph + 1.8 * np.sin(2.5 * ph))                # metalik (FM)
+    tone = crush(fm, 6) * np.clip(t / 0.002, 0, 1) * (0.35 + 0.65 * u) * np.clip((dur - t) / 0.003, 0, 1)
+    mx.add(panned(tone, 0.85 * pan0 * (1 - u)), t0, gain=gain, reverb=0.08)
+    tc = span(0.03)
+    click = band(rng.standard_normal(len(tc)), lo=2000) * pluck(tc, 0.0003, 0.004)
+    mx.add(peak(click), arrive, gain=0.5 * gain, reverb=0.05)
 
 
-def zap(mx, t0, t1, strength, rng):
-    """Logo yanıp söndüğünde: flaş süresince cızırtılı elektrik çıtırtısı ve alçak vuruş."""
+def lock(mx, t0, f, pan):
+    """Bir kopyanın konturu kapandı: kısa kare dalga onay bipi."""
+    t = span(0.06)
+    blip = square(TAU * f * t, f) * gate(t, 0.0005, 0.03, 0.004) * np.exp(-t / 0.05)
+    mx.add(blip, t0, gain=0.07, pan=pan, reverb=0.12)
+
+
+def chatter(mx, t0, t1, rng):
+    """Arka planda hesaplama gibi rastgele tiz veri bipleri; sıklığı giderek artar."""
+    t = t0
+    while True:
+        u = (t - t0) / (t1 - t0)
+        t += rng.exponential(1 / (7 + 45 * u ** 2))
+        if t >= t1:
+            break
+        f = CHATTER[rng.integers(len(CHATTER))]
+        d = rng.uniform(0.006, 0.016)
+        tb = span(d + 0.002)
+        blip = np.sin(TAU * f * tb) * gate(tb, 0.0005, d, 0.001)
+        mx.add(blip, t, gain=rng.uniform(0.012, 0.03), pan=rng.uniform(-0.85, 0.85), reverb=0.1)
+
+
+def hum(t, t_in, t_rise, solid, wipe0, wipe1):
+    """Alçak dijital uğultu (Si♭1 sinüs + ezik kare); silmede tonu aşağı çökerek kapanır."""
+    f = np.full(len(t), HUM)
+    u = np.clip((t - wipe0) / (wipe1 - wipe0), 0, 1)
+    f *= 2 ** (-2.2 * u ** 1.5)                               # kapanma: ~2 oktav aşağı
+    ph = glide(f)
+    sq = hold(crush(square(2 * ph, 2 * HUM, top=900), 6), 6)
+    sig = np.sin(ph) + 0.22 * sq
+    level = np.interp(t, [0, t_in, t_in + 0.25, t_rise, solid, wipe0, wipe1, wipe1 + 0.08],
+                      [0, 0, 0.35, 0.4, 1.0, 1.0, 0.6, 0.0])
+    return sig * level
+
+
+def stepped_riser(mx, t0, t1, flashes, rng):
+    """Kopyalar birleşirken: hızlanan basamaklı kare dalga dizisi ve ezik gürültü; logo dolunca kesilir.
+    Logo her yanıp söndüğünde dizi susar: flaşlarla aynı ritimde kesilir."""
+    dur = t1 - t0
+    # adımlar giderek kısalır: pentatonik dizide Si♭3'ten Si♭6'ya
+    n = len(ARP)
+    w = np.linspace(1.0, 0.25, n)
+    edges = t0 + dur * np.concatenate([[0], np.cumsum(w) / w.sum()])
+    t = span(dur)
+    tt = t0 + t
+    f = np.array(ARP)[np.clip(np.searchsorted(edges, tt, side="right") - 1, 0, n - 1)]
+    ph = glide(f)
+    tone = square(ph, max(ARP), top=9000)
+    # her adımın başında keskin vurgu
+    step_start = edges[np.clip(np.searchsorted(edges, tt, side="right") - 1, 0, n - 1)]
+    accent = 0.55 + 0.45 * np.exp(-(tt - step_start) / 0.02)
+    u = t / dur
+    env = (0.25 + 0.75 * u ** 1.5) * accent * np.clip((dur - t) / 0.002, 0, 1)
+    duck = np.ones(len(t))
+    for a, b in flashes:
+        duck *= 1 - ((tt >= a) & (tt < b + 0.004))
+    mx.add(tone * env * duck, t0, gain=0.09, reverb=0.08)
+    noise = hold(crush(rng.standard_normal(len(t)), 4), 3)
+    noise = peak(band(noise, lo=500, hi=2500)) * (1 - u) + peak(band(noise, lo=2500, hi=12000)) * u   # tizleşir
+    noise_env = u ** 2.2 * duck * np.clip((dur - t) / 0.002, 0, 1)
+    mx.add(noise * noise_env, t0, gain=0.12, reverb=0.05)
+
+
+def glitch(mx, t0, t1, k, rng):
+    """Logo yanıp söndüğünde: flaş süresince keskin kesilmiş glitch patlaması."""
     d = t1 - t0
-    t = span(d + 0.15)
-    gate = np.clip(t / 0.002, 0, 1) * np.clip((d + 0.012 - t) / 0.012, 0, 1)
-    crackle = band(rng.standard_normal(len(t)), lo=2500, hi=11000)
-    flutter = np.repeat(rng.uniform(0.2, 1.0, len(t) // 24 + 1), 24)[:len(t)]   # düzensiz titreşim
-    buzz = np.sign(np.sin(TAU * 116.54 * t)) * 0.5 + np.sign(np.sin(TAU * 233.08 * t)) * 0.25
-    buzz = band(buzz, hi=3000)
-    thump = np.sin(glide(55 + 45 * np.exp(-t / 0.02))) * np.exp(-t / 0.07) * (1 - np.exp(-t / 0.001))
-    s = 0.6 * peak(crackle) * flutter * gate + 0.3 * peak(buzz) * gate + 0.7 * thump
-    mx.add(s, t0, gain=0.6 * strength, reverb=0.25)
+    t = span(d + 0.03)
+    g = gate(t, 0.0005, d, 0.002)
+    noise = hold(crush(rng.standard_normal(len(t)), 3), rng.integers(2, 6))
+    f = (note("Bb6"), note("F6"))[k % 2]
+    tone = square(TAU * f * t, f, top=10000)
+    thump = np.sin(glide(55 + 90 * np.exp(-t / 0.008))) * pluck(t, 0.0005, 0.03)
+    s = (0.55 * peak(band(noise, lo=1200)) + 0.3 * tone) * g + 0.6 * thump
+    mx.add(s, t0, gain=0.34 + 0.03 * k, reverb=0.06)
 
 
 def impact(mx, t0, rng):
-    """Logo dolup yerine oturduğunda: derin vuruş, gövde, çatırtı ve tonda parıltı."""
-    t = span(1.8)
-    boom = np.tanh(2.0 * np.sin(glide(38 + 90 * np.exp(-t / 0.05))) * np.exp(-t / 0.5)) / np.tanh(2.0)
-    boom *= 1 - np.exp(-t / 0.0015)
-    noise = rng.standard_normal(len(t))
-    body = peak(band(noise, hi=800)) * np.exp(-t / 0.035)
-    crack = peak(band(noise, lo=3000)) * np.exp(-t / 0.006)
-    mx.add(0.95 * boom + 0.4 * body + 0.3 * crack, t0, gain=0.95, reverb=0.25)
-    shimmer = np.zeros(len(t))
-    for f, amp, decay in ((932.33, 1.0, 1.2), (1396.91, 0.6, 0.9), (1864.66, 0.45, 0.7), (2349.32, 0.3, 0.5)):
-        shimmer += amp * np.sin(TAU * f * t + rng.uniform(0, TAU)) * np.exp(-t / decay)
-    mx.add(peak(shimmer) * (1 - np.exp(-t / 0.004)), t0, gain=0.07, reverb=0.55)
+    """Logo dolup yerine oturduğunda: sıkı dijital vuruş, ezik şaklama ve FM ping."""
+    t = span(1.2)
+    kick = np.tanh(3.0 * np.sin(glide(45 + 130 * np.exp(-t / 0.028))) * pluck(t, 0.0005, 0.2)) / np.tanh(3.0)
+    snap = hold(crush(rng.standard_normal(len(t)), 4), 2)
+    snap = peak(band(snap, lo=1500)) * pluck(t, 0.0003, 0.02)
+    mx.add(0.95 * kick + 0.5 * snap, t0, gain=0.95, reverb=0.08)
+    fc, fm = note("Bb5"), note("Bb5") * 3.5
+    index = 6.0 * np.exp(-t / 0.08)
+    ping = np.sin(TAU * fc * t + index * np.sin(TAU * fm * t)) * pluck(t, 0.0005, 0.45)
+    mx.add(ping, t0, gain=0.12, reverb=0.25)
 
 
-def follow(mx, samples, rng, gain, f_lo, f_hi, shape):
-    """Ekranda hareket eden bir cepheyi izleyen hava sesi: konumu cepheyle soldan sağa kayar.
-    shape(u) zarfıdır (u: 0 -> 1, sonunda 0 olmalı)."""
+def type_tick(mx, t0, pan, rng):
+    """Harf belirince: dijital "yazma" tıkı (kısa kare bip + tık)."""
+    t = span(0.03)
+    f = TYPE_NOTES[rng.integers(len(TYPE_NOTES))]
+    blip = square(TAU * f * t, f) * gate(t, 0.0004, 0.012, 0.004)
+    click = band(rng.standard_normal(len(t)), lo=3000) * pluck(t, 0.0002, 0.0025)
+    mx.add(0.6 * blip + 0.5 * peak(click), t0, gain=0.2, pan=pan, reverb=0.08)
+
+
+def scanner(mx, samples, rng):
+    """Yazının üzerinden geçen cepheyi izleyen dijital tarayıcı: 60 Hz'de titreyen dar bant ses."""
     ts, pans = np.array(samples, float).T
-    t0, t1 = ts[0], ts[-1]
-    t = span(t1 - t0)
-    tt = t0 + t
-    env = shape(t / (t1 - t0))
-    left, right = air(len(t), f_lo + (f_hi - f_lo) * env, 1.2, rng)
-    sig = panned(left, right, 0.9 * np.interp(tt, ts, pans))
-    mx.add(sig / np.abs(sig).max() * env[:, None], t0, gain=gain, reverb=0.25)
+    dur = ts[-1] - ts[0]
+    t = span(dur)
+    tt = ts[0] + t
+    u = t / dur
+    carrier = crush(np.sin(TAU * 3729.31 * t), 5)            # Si♭7
+    chop = (np.sin(TAU * 60 * t) > 0).astype(float)          # dijital titreşim
+    env = np.sin(np.pi * u) ** 0.8 * (0.4 + 0.6 * chop)
+    mx.add(panned(carrier * env, 0.9 * np.interp(tt, ts, pans)), ts[0], gain=0.035, reverb=0.05)
 
 
-def bell(mx, t0, f, pan, gain):
-    """Harf belirince ince nota."""
-    t = span(0.9)
-    s = (np.sin(TAU * f * t) * np.exp(-t / 0.35) + 0.3 * np.sin(TAU * 2 * f * t) * np.exp(-t / 0.15)
-         + 0.12 * np.sin(TAU * 3.01 * f * t) * np.exp(-t / 0.06))
-    mx.add(s * (1 - np.exp(-t / 0.002)), t0, gain=gain, pan=pan, reverb=0.4)
+def swipe(mx, samples, rng):
+    """Silme: soldan sağa giden ezik gürültü süpürmesi; cephe hızlandıkça tizleşir."""
+    ts, pans = np.array(samples, float).T
+    dur = ts[-1] - ts[0]
+    t = span(dur)
+    tt = ts[0] + t
+    u = t / dur
+    speed = np.sin(np.pi * u) ** 1.5
+    noise = hold(crush(rng.standard_normal(len(t)), 4), 2)
+    lo_band = band(noise, lo=400, hi=2500)
+    hi_band = band(noise, lo=2500, hi=12000)
+    sig = (peak(lo_band) * (1 - speed) + peak(hi_band) * speed) * speed
+    mx.add(panned(sig, 0.9 * np.interp(tt, ts, pans)), ts[0], gain=0.3, reverb=0.06)
 
 
-def downer(mx, t0, gain):
-    """Silme başlarken akor değişimini vurgulayan alçak, inen vuruş."""
-    t = span(0.7)
-    s = np.sin(glide(40 + 60 * np.exp(-t / 0.08))) * np.exp(-t / 0.25) * (1 - np.exp(-t / 0.003))
-    mx.add(s, t0, gain=gain, reverb=0.2)
+def shutdown(mx, t0, t_end, rng):
+    """Silme başlarken aşağı çöken kare dalga, sonunda (ekran kararınca) kesin bir tık."""
+    dur = t_end - t0
+    t = span(dur)
+    u = t / dur
+    f = note("Bb4") * 2 ** (-3 * u ** 1.3)
+    tone = crush(square(glide(f), note("Bb4"), top=6000), 5) * (1 - u) ** 0.5
+    mx.add(tone * np.clip(t / 0.001, 0, 1), t0, gain=0.07, reverb=0.08)
+    tc = span(0.25)
+    end = (np.sin(glide(45 + 80 * np.exp(-tc / 0.01))) * pluck(tc, 0.0005, 0.06)
+           + 0.4 * peak(band(rng.standard_normal(len(tc)), lo=2500)) * pluck(tc, 0.0003, 0.003))
+    mx.add(end, t_end, gain=0.45, reverb=0.1)
 
 
 # ---------------------------------------------------------------- miks
@@ -210,40 +253,29 @@ def synthesize(events, seed=4):
     t = np.arange(int(round(duration * SR))) / SR
     turn, solid = events["turn"], events["solid"]
     wipe0, wipe1 = events["wipe"][0][0], events["wipe"][-1][0]
-
-    # Müzik yatağı: pad referanstaki gibi kabarır; bas kopyalar birleşirken güçlenip logo dolunca tam güçte
-    bass_level = ((0.0, -70), (0.4, -30), (turn[0], -20), (solid - 0.03, -7), (solid, 0), (duration, 0))
-    bed = 0.45 * pad(t, wipe0, rng) * envelope(t, PAD_LEVEL)[:, None]
-    bed += 0.34 * bass(t, wipe0) * envelope(t, bass_level)[:, None]
-    wet = convolve(bed, reverb_ir(rng, length=3.0, rt60=2.4))
-    bed += 0.35 * wet * np.abs(bed).max() / (np.abs(wet).max() + 1e-12)
-    # yatak, flaşlarda ve logo dolduğunda kısa süre çekilir: vuruşlar öne çıkar
-    hits = [(a, b - a) for a, b in events["flashes"]]
-    bed *= (ducking(t, hits, 0.35) * ducking(t, [(solid, 0.02)], 0.55, release=0.35))[:, None]
-
-    # Efektler: her biri görüntüdeki olayla aynı karede
     mx = Mixer(duration)
-    for k, s in enumerate(events["snakes"]):
-        swish(mx, s["t0"], s["arrive"], s["pan"], rng, gain=0.2)
-        tick(mx, s["done"], TICKS[k % len(TICKS)], 0.15 * s["pan"], gain=0.07)
-    riser(mx, turn[0], solid, events["flashes"], rng, gain=0.24)
+
+    boot(mx, events["boot"])
+    done = sorted(events["snakes"], key=lambda s: s["done"])
+    for s in events["snakes"]:
+        laser(mx, s["t0"], s["arrive"], s["pan"], rng, gain=0.12)
+    for k, s in enumerate(done):
+        lock(mx, s["done"], LOCK_NOTES[k % len(LOCK_NOTES)], 0.2 * s["pan"])
+    chatter(mx, events["boot"] + 0.08, solid, rng)
+    stepped_riser(mx, turn[0], solid, events["flashes"], rng)
     for k, (a, b) in enumerate(events["flashes"]):
-        zap(mx, a, b, 0.75 + 0.07 * k, rng)
+        glitch(mx, a, b, k, rng)
     impact(mx, solid, rng)
-    follow(mx, events["reveal"], rng, gain=0.09, f_lo=1500, f_hi=5500,
-           shape=lambda u: np.sin(np.pi * u) ** 1.2)
-    for k, (tl, p) in enumerate(events["letters"]):
-        bell(mx, tl, BELLS[k % len(BELLS)], 0.8 * p, gain=0.08)
-    follow(mx, events["wipe"], rng, gain=0.3, f_lo=600, f_hi=5000,
-           shape=lambda u: np.sin(np.pi * u) ** 1.5)
-    downer(mx, wipe0, gain=0.35)
-    sfx = mx.dry + 0.4 * convolve(mx.send, reverb_ir(rng, length=2.4, rt60=1.8))
+    for tl, p in events["letters"]:
+        type_tick(mx, tl, 0.8 * p, rng)
+    scanner(mx, events["reveal"], rng)
+    swipe(mx, events["wipe"], rng)
+    shutdown(mx, wipe0, wipe1, rng)
 
-    mix = bed + sfx
-    fade_start = wipe1 + 0.02                # ekran kararınca söner
-    fade = 0.5 + 0.5 * np.cos(np.pi * np.clip((t - fade_start) / (duration - fade_start), 0, 1))
-    mix *= fade[:, None]
+    base = hum(t, events["boot"], turn[0], solid, wipe0, wipe1)
+    mix = mx.dry + 0.11 * np.stack([base, base], -1)
+    mix += 0.3 * convolve(mx.send, reverb_ir(rng, length=0.8, rt60=0.45))   # çok kısa oda: net kalsın
 
-    # Hafif doyurma ile sıkıştırıp tepe seviyeyi -1 dBFS'e getir
-    mix = np.tanh(1.3 * mix / np.abs(mix).max()) / np.tanh(1.3)
+    # Tepe seviyeyi -1 dBFS'e getir (sert olmayan, hafif bir sınırlayıcıyla)
+    mix = np.tanh(1.15 * mix / np.abs(mix).max()) / np.tanh(1.15)
     return (mix * 10 ** (-1 / 20)).astype(np.float32)

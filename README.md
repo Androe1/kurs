@@ -133,18 +133,20 @@ Linux'ta sunucuda çalıştırmak için `libegl1` gerekir (ekran kartı gerekmez
 # Void Creations - Intro (4.4 saniye)
 
 Hazır video: [`output/void_creations_intro.mp4`](output/void_creations_intro.mp4)
-(1920x1080, 60 fps, H.264 + AAC stereo). Referans videonun ilk 4 saniyesindeki animasyon;
+(1920x1080, 60 fps, H.264 + AAC stereo). Referans videonun ilk 4 saniyesindeki animasyon akışı;
 ekranda logo ve yazıdan başka hiçbir şey yok. V logosu VOID'in V'sidir: **[V]OID CREATIONS**.
-Yazı, orijinal yazı görselinin birebir aynısıdır (harfler, aralıklar, logonun yeri).
+Yazı, orijinal yazı görselinin birebir aynısıdır (harfler, aralıklar, logonun yeri) ve parlamasızdır
+(keskin beyaz). Arka plan referansla aynı temada ama özgündür: referanstaki öğelerin hiçbiri kullanılmadı.
 
-| Saniye       | Görüntü                                                                                          | Ses                                          |
+| Saniye       | Görüntü                                                                                          | Ses (dijital)                                |
 |--------------|--------------------------------------------------------------------------------------------------|----------------------------------------------|
-| 0.36 - 1.2   | Perspektifte teknik çizim zemini belirir (daireler, taralı bantlar, işaretler, kılavuz çizgiler); ekran dışından gelen ışık çizgileri köşelerde dönerek V logosunun 3B'de üst üste dizili beş kopyasını çizer | sessizlikten kabaran pad; her çizgi geldiği yandan logoya süzülen bir hava sesiyle gelir, her kopya kapanınca ince bir "tık" |
-| 1.48 - 2.17  | Kamera logoya döner, kopyalar tek logoda birleşir; öndeki kopya hızlanan aralıklarla dolu beyaz yanıp söner, zemin kararır | Si♭ tonunda yükselen gerilim; her flaşta elektrik çıtırtısı ve alçak vuruş (gerilim de flaşlarla birlikte kesilir) |
-| 2.2          | Logo dolar                                                                                       | derin vuruş, çatırtı, parıltı; bas tam güçte |
-| 2.2 - 2.8    | Logo küçülüp sola kayarak VOID'in V'si olur; OID CREATIONS önce ince kontur, ardından eğik bir dolgu cephesiyle soldan sağa belirir | cepheyle soldan sağa giden hışırtı, her harfe ince bir nota |
-| 3.47 - 3.73  | Logonun eğimiyle (18.3°) aynı açıda bir silme her şeyi soldan sağa siler                          | soldan sağa hava sesi, inen vuruş; akor Sol minöre döner |
-| 3.73 - 4.4   | siyah                                                                                            | ses söner                                    |
+| 0.36         | Perspektifte teknik çizim zemini belirir: ızgara, logonun 18.3° eğiminden V şevronları ve eğik şerit grupları, yanıp sönen nokta matrisleri, cetveller, köşe işaretleri, akan kesikli kılavuzlar | "sistem açılıyor": alçak tık ve iki kısa bip |
+| 0.39 - 1.2   | Ekran dışından gelen ışık çizgileri köşelerde dönerek V logosunun 3B'de üst üste dizili beş kopyasını çizer | her çizgiye geldiği yandan metalik dijital lazer ve logoya değince tık; kapanan her kopyaya yükselen onay bipleri; arkada tiz veri bipleri |
+| 1.48 - 2.17  | Kamera logoya döner, kopyalar tek logoda birleşir; öndeki kopya hızlanan aralıklarla dolu beyaz yanıp söner, zemin kararır | hızlanan basamaklı kare dalga dizisi ve ezik gürültü; her flaşta keskin kesilmiş glitch patlaması |
+| 2.2          | Logo dolar                                                                                       | sıkı dijital vuruş, ezik şaklama, FM ping    |
+| 2.2 - 2.8    | Logo küçülüp sola kayarak VOID'in V'si olur; OID CREATIONS önce ince kontur, ardından eğik bir dolgu cephesiyle soldan sağa belirir | her harfe dijital "yazma" tıkı, cepheyi izleyen tarayıcı sesi |
+| 3.47 - 3.73  | Logonun eğimiyle (18.3°) aynı açıda bir silme her şeyi soldan sağa siler                          | soldan sağa ezik süpürme, ton aşağı çöker (kapanma), ekran kararınca son tık |
+| 3.73 - 4.4   | siyah                                                                                            | sessiz                                       |
 
 ```bash
 python void_creations.py                 # output/void_creations_intro.mp4
@@ -152,16 +154,19 @@ python void_creations.py --still 1.3     # tek kareyi PNG kaydet
 ```
 
 - `void_creations.py` - videoyu üretir
-- `void_scene.py` - sahne: perspektifteki zemin, ışık çizgileri (trim path), 3B kopya yığını,
-  birleşme ve yanıp sönme, yazının kontur + dolgu açılışı, eğik silme. V logosu vektör olarak
-  (`LOGO`, iki dörtgen) tanımlı; köşeler logo görselinin kenarlarına alt piksel doğrulukla oturtuldu.
-  Yazı orijinal görselden ölçüldü: harfler `fonts/Inter-Black.ttf` (görseldekiyle birebir), N ise
-  görseldeki özel çizim (`N_POLY`, düz kenarlı çokgen); konumlar `LETTERS`
-- `void_sound.py` - ses tasarımı (numpy ile sentez; hazır ses kullanılmaz). Referanstaki gibi
-  kabaran bir pad (Si♭(add9) -> Sol minör(add9), temiz alt bas) ve ekrandaki her olayla aynı karede
-  çalan efektler; zamanlar ve ekran konumları sahnenin `events()` fonksiyonundan gelir
+- `void_scene.py` - sahne: perspektifteki zemin (`Backdrop`), ışık çizgileri (trim path), 3B kopya yığını,
+  birleşme ve yanıp sönme, yazının kontur + dolgu açılışı, eğik silme. Parlama yalnızca çizgi ve kopya
+  evresinde; logo ve yazıda yok (`T_GLOW_OFF`). V logosu vektör olarak (`LOGO`, iki dörtgen) tanımlı;
+  köşeler logo görselinin kenarlarına alt piksel doğrulukla oturtuldu. Yazı orijinal görselden ölçüldü:
+  harfler `fonts/Inter-Black.ttf` (görseldekiyle birebir), N ise görseldeki özel çizim (`N_POLY`, düz
+  kenarlı çokgen); konumlar `LETTERS`
+- `void_sound.py` - dijital ses tasarımı (numpy ile sentez; hazır ses kullanılmaz): bant sınırlı kare dalga
+  bipler, FM ping ve lazer, bitcrush glitch'ler, basamaklı dizi, sıkı alt vuruşlar; zarflar milisaniye
+  hassasiyetinde, yankı çok kısa. Ton Si♭ minör pentatonik. Zamanlar ve ekran konumları sahnenin
+  `events()` fonksiyonundan gelir; her ses görüntüdeki olayla aynı karede başlar
 - `output/taslak/void_storyboard.png` - bitmiş videodan 12 anahtar kare
 
-Düzenleme: zamanlama `void_scene.py` başındaki `T_*`, `FLASHES`, `COLLAPSE`; yığın `STACK_*`, `TILT`,
-`SPIN`; yazı boyutu `CAP`; akorlar, notalar ve seviye eğrileri `void_sound.py` başında.
+Düzenleme: zamanlama `void_scene.py` başındaki `T_*`, `FLASHES`, `COLLAPSE`; zemin `GRID_*`, `CHEVRONS`,
+`STRIPES`, `DOTS`, `RULERS`, `BRACKETS`, `GUIDES`; yığın `STACK_*`, `TILT`, `SPIN`; yazı boyutu `CAP`;
+sesler ve notalar `void_sound.py` içinde.
 `output/taslak/void_karsilastirma.mp4`: üstte referans, altta bizim; önce referansın sesiyle, sonra bizimkiyle.
