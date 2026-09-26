@@ -1,16 +1,15 @@
 """Androe Studio intro animasyonu - ses tasarımı.
 
 Tüm sesler numpy ile sıfırdan sentezlenir, hazır ses dosyası kullanılmaz.
-Zamanlamalar görsel sahneden gelir; her patlama, tık ve nota görüntüdeki
+Zamanlamalar görsel sahneden gelir; her vuruş, kayış ve nota görüntüdeki
 olayla aynı anda duyulur.
 
-  küp belirir        -> yumuşak "pop"
-  enerji toplama     -> yükselen hışırtı + şarj tonu
-  patlama            -> derin bas vuruş, çatırtı, saçılan parça sesleri
-  bloklar oturur     -> soldan sağa ilerleyen plastik tıkırtılar
-  harf tamamlanır    -> yükselen pentatonik notalar (Do Re Mi Sol La Do)
-  ışık taraması      -> parlak çan + ışıltı, arkasından sıcak bir akor
-  STUDIO açılır      -> hafif hava sesi
+  ikon dönerek gelir   -> yaklaştıkça yükselen, dönüşle nabız atan "vuuum"
+  ikon yerine oturur   -> derin vuruş, çatırtı, parlak çan
+  ikon kayar           -> ikonun yönünde soldan sağa / sağdan sola "whoosh"
+  harfler çıkar        -> her harfe bir nota (ANDROE yükselir, STUDIO alçalır)
+  ikon durur           -> yumuşak "tok"
+  logo oturur          -> çan, ışıltı, alt vuruş ve sıcak bir akor
 """
 import wave
 
@@ -114,30 +113,25 @@ def convolve(x, ir):
 
 # ---------------------------------------------------------------- ses efektleri
 
-def cube_pop(mx, t0, rng):
-    t = span(0.35)
-    ph = glide(170 * 3.4 ** np.minimum(t / 0.07, 1))
-    body = (np.sin(ph) + 0.22 * np.sin(2 * ph)) * (1 - np.exp(-t / 0.002)) * np.exp(-t / 0.075)
-    click = peak(band(rng.standard_normal(len(t)), lo=2500)) * np.exp(-t / 0.0012)
-    mx.add(0.9 * peak(body) + 0.2 * click, t0, gain=0.3, reverb=0.25)
-
-
-def charge(mx, t0, t1, rng):
+def spin_in(mx, t0, t1, spin_t, facing, rng):
+    """İkon derinlikten dönerek gelirken: yaklaştıkça yükselen, dönüşle nabız atan hava sesi."""
     dur = t1 - t0
     t = span(dur)
     u = t / dur
-    env = u**2.3 * np.clip((dur - t) / 0.012, 0, 1)        # patlamadan hemen önce susar
-    fc = 250 * 24 ** (u**1.4)
-    noise = np.stack([sweep_band(rng.standard_normal(len(t)), fc, 1.6) for _ in range(2)], -1)
-    mx.add(noise / np.abs(noise).max() * env[:, None], t0, gain=0.3, reverb=0.15)
+    near = (1 - (1 - u) ** 3) ** 2                        # yaklaşma (görüntüdeki gibi yavaşlayarak)
+    pulse_ = 0.3 + 0.7 * np.interp(t0 + t, spin_t, facing) ** 2
+    env = near * pulse_ * np.clip(t / 0.03, 0, 1) * np.clip((dur - t) / 0.01, 0, 1)
+    fc = 350 * 7.5 ** near
+    air = np.stack([sweep_band(rng.standard_normal(len(t)), fc, 1.4) for _ in range(2)], -1)
+    mx.add(air / np.abs(air).max() * env[:, None], t0, gain=0.34, reverb=0.2)
 
-    ph = glide(70 * 4 ** (u**1.8))
-    trem = 0.75 + 0.25 * np.sin(glide(6 + 34 * u**2))
-    tone = (np.sin(ph) + 0.35 * np.sin(2 * ph + 0.3) + 0.18 * np.sin(3 * ph)) * trem * env
-    mx.add(peak(tone), t0, gain=0.16, reverb=0.1)
+    ph = glide(90 * 4 ** (u**1.6))
+    tone = (np.sin(ph) + 0.35 * np.sin(2 * ph + 0.3) + 0.18 * np.sin(3 * ph)) * u**2.2
+    mx.add(peak(tone) * np.clip((dur - t) / 0.01, 0, 1), t0, gain=0.12, reverb=0.1)
 
 
 def impact(mx, t0, rng):
+    """İkon yerine oturduğunda: derin vuruş, çatırtı, saçılan parçalar ve parlak çan."""
     t = span(2.0)
     env = (1 - np.exp(-t / 0.0015)) * np.exp(-t / 0.30)
     boom = np.tanh(1.8 * np.sin(glide(38 + 100 * np.exp(-t / 0.045))) * env) / np.tanh(1.8)
@@ -145,64 +139,75 @@ def impact(mx, t0, rng):
     punch = peak(band(noise, hi=900)) * np.exp(-t / 0.03)
     crack = peak(band(noise, lo=2500)) * np.exp(-t / 0.005)
     mx.add(0.9 * boom + 0.45 * punch + 0.3 * crack, t0, reverb=0.25)
+    bell(mx, t0, 1046.5, gain=0.08, rng=rng)
 
-    # Küpün parçalara ayrılışı: saçılan küçük, sert tıkırtılar
     tt = span(0.06)
-    for _ in range(70):
-        dt = min(0.004 + rng.exponential(0.07), 0.45)
-        f = rng.uniform(1700, 5200)
-        tau = rng.uniform(0.004, 0.014)
+    for _ in range(30):
+        dt = min(0.004 + rng.exponential(0.06), 0.35)
+        f = rng.uniform(1900, 5200)
+        tau = rng.uniform(0.004, 0.012)
         grain = (np.sin(TAU * f * tt + rng.uniform(0, TAU)) * np.exp(-tt / tau)
                  + 0.4 * np.sin(TAU * 2.63 * f * tt) * np.exp(-tt / (0.6 * tau)))
-        amp = 0.13 * rng.uniform(0.35, 1) * np.exp(-dt / 0.18)
+        amp = 0.1 * rng.uniform(0.35, 1) * np.exp(-dt / 0.15)
         mx.add(grain * amp, t0 + dt, pan=rng.uniform(-0.85, 0.85), reverb=0.2)
 
 
-def block_clicks(mx, landings, rng):
-    """Her blok yerine oturduğunda kısa bir plastik tık; soldan sağa ilerler."""
-    tt = span(0.05)
-    for t0, x in landings:
-        f = (1500 + 1500 * x) * rng.uniform(0.88, 1.12)
-        tick = (np.sin(TAU * f * tt) * np.exp(-tt / 0.011)
-                + 0.5 * np.sin(TAU * 2.17 * f * tt) * np.exp(-tt / 0.005))
-        noise = rng.uniform(-1, 1, len(tt)) * np.exp(-tt / 0.0009)
-        mx.add((tick + 0.5 * noise) * rng.uniform(0.6, 1.0), t0, gain=0.05,
-               pan=-0.7 + 1.4 * x, reverb=0.12)
+def bell(mx, t0, f0, gain, rng):
+    t = span(2.6)
+    tone = 0.5 * np.sin(TAU * f0 / 2 * t) * np.exp(-t / 1.8)
+    for ratio, amp, decay in ((1.0, 1.0, 1.6), (2.0, 0.45, 1.1), (2.76, 0.3, 0.7),
+                              (5.4, 0.16, 0.35), (8.93, 0.08, 0.18)):
+        tone += amp * np.sin(TAU * f0 * ratio * t + rng.uniform(0, TAU)) * np.exp(-t / decay)
+    mx.add(peak(tone) * (1 - np.exp(-t / 0.003)), t0, gain=gain, reverb=0.5)
+
+
+def swoosh(mx, t0, t1, x0, x1, rng):
+    """İkon kayarken: hızına göre parlaklaşan, ikonla birlikte stereo alanda gezen hava sesi."""
+    dur = t1 - t0
+    t = span(dur + 0.1)
+    u = np.clip(t / dur, 0, 1)
+    speed = np.where(u < 0.5, 4 * u**2, 4 * (1 - u) ** 2)   # ease-in-out hız eğrisi (tepe 1)
+    e = np.where(u < 0.5, 4 * u**3, 1 - (2 - 2 * u) ** 3 / 2)
+    pan = np.clip(2 * (x0 + (x1 - x0) * e) - 1, -0.85, 0.85)
+    air = [sweep_band(rng.standard_normal(len(t)), 500 + 2600 * speed, 1.1) for _ in range(2)]
+    env = speed**1.3
+    for ch, sig in enumerate(air):
+        sig = sig / np.abs(sig).max() * env
+        mx.add(sig, t0, gain=0.3, pan=np.clip(pan + (0.25 if ch else -0.25), -1, 1), reverb=0.2)
+
+
+def stop_thump(mx, t0, x, gain):
+    """İkon durduğunda yumuşak, tok bir vuruş."""
+    t = span(0.6)
+    body = np.sin(glide(70 + 90 * np.exp(-t / 0.02))) * (1 - np.exp(-t / 0.002)) * np.exp(-t / 0.12)
+    click = np.sin(TAU * 2400 * t) * np.exp(-t / 0.004)
+    mx.add(body + 0.25 * click, t0, gain=gain, pan=np.clip(2 * x - 1, -0.7, 0.7), reverb=0.15)
 
 
 def letter_notes(mx, letters):
-    """Her harf tamamlandığında yükselen bir nota: Do Re Mi Sol La Do."""
-    t = span(1.4)
-    for (t0, x), f in zip(letters, NOTES):
-        tone = (np.sin(TAU * f * t) * np.exp(-t / 0.45)
-                + 0.28 * np.sin(TAU * 2 * f * t) * np.exp(-t / 0.18)
-                + 0.12 * np.sin(TAU * 3.01 * f * t) * np.exp(-t / 0.08))
-        mx.add(tone * (1 - np.exp(-t / 0.002)), t0, gain=0.16, pan=-0.5 + x, reverb=0.35)
+    """Her harf ikonun altından çıktığında bir nota: A-N-D-R-O-E / S-T-U-D-I-O = Do Re Mi Sol La Do."""
+    t = span(0.9)
+    for t0, i, x in letters:
+        f = NOTES[i]
+        tone = (np.sin(TAU * f * t) * np.exp(-t / 0.3)
+                + 0.28 * np.sin(TAU * 2 * f * t) * np.exp(-t / 0.12)
+                + 0.12 * np.sin(TAU * 3.01 * f * t) * np.exp(-t / 0.05))
+        mx.add(tone * (1 - np.exp(-t / 0.002)), t0, gain=0.1, pan=np.clip(2 * x - 1, -0.8, 0.8),
+               reverb=0.35)
 
 
-def resolve(mx, t0, t1, rng):
-    """Blok harfler pürüzsüz yazıya dönerken: çan, ışıltı ve yumuşak alt vuruş."""
-    t = span(2.6)
-    bell = 0.5 * np.sin(TAU * 523.25 * t) * np.exp(-t / 1.8)
-    for ratio, amp, decay in ((1.0, 1.0, 1.6), (2.0, 0.45, 1.1), (2.76, 0.3, 0.7),
-                              (5.4, 0.16, 0.35), (8.93, 0.08, 0.18)):
-        bell += amp * np.sin(TAU * 1046.5 * ratio * t + rng.uniform(0, TAU)) * np.exp(-t / decay)
-    mx.add(peak(bell) * (1 - np.exp(-t / 0.003)), t0, gain=0.14, reverb=0.5)
-
-    sweep = t1 - t0
-    t = span(sweep + 0.3)
-    u = np.clip(t / sweep, 0, 1)
-    env = np.sin(np.pi * u) ** 1.5
+def resolve(mx, t0, rng):
+    """Logo son yerine oturunca: çan, ışıltı ve yumuşak alt vuruş."""
+    bell(mx, t0, 1046.5, gain=0.13, rng=rng)
+    t = span(0.9)
+    env = np.sin(np.pi * np.clip(t / 0.6, 0, 1)) ** 1.5
     shimmer = peak(band(rng.standard_normal(len(t)), lo=5000, hi=12000)) * env
-    mx.add(shimmer, t0, gain=0.06, pan=-0.8 + 1.6 * u, reverb=0.4)
-
+    mx.add(shimmer, t0, gain=0.05, reverb=0.4)
     tt = span(0.12)
-    for _ in range(28):
-        dt = rng.uniform(0, sweep)
-        f = rng.uniform(4500, 9000)
-        spark = np.sin(TAU * f * tt) * np.exp(-tt / rng.uniform(0.015, 0.04))
-        mx.add(spark, t0 + dt, gain=0.025, pan=-0.8 + 1.6 * dt / sweep, reverb=0.5)
-
+    for _ in range(24):
+        dt = rng.uniform(0, 0.6)
+        spark = np.sin(TAU * rng.uniform(4500, 9000) * tt) * np.exp(-tt / rng.uniform(0.015, 0.04))
+        mx.add(spark, t0 + dt, gain=0.022, pan=rng.uniform(-0.8, 0.8), reverb=0.5)
     t = span(1.2)
     thump = np.sin(glide(48 + 30 * np.exp(-t / 0.05))) * (1 - np.exp(-t / 0.004)) * np.exp(-t / 0.35)
     mx.add(thump, t0, gain=0.4, reverb=0.1)
@@ -233,13 +238,6 @@ def pad(mx, t0, t_release, t_end, rng):
     mx.add(out / np.abs(out).max() * env[:, None], t0, gain=0.17, reverb=0.25)
 
 
-def whoosh(mx, t0, dur, rng):
-    t = span(dur)
-    u = t / dur
-    air = np.stack([sweep_band(rng.standard_normal(len(t)), 700 * 4**u, 0.9) for _ in range(2)], -1)
-    mx.add(air / np.abs(air).max() * (np.sin(np.pi * u) ** 2)[:, None], t0, gain=0.12, reverb=0.3)
-
-
 def glint(mx, t0):
     t = span(0.9)
     ting = (np.sin(TAU * 2637 * t) * np.exp(-t / 0.35)
@@ -253,17 +251,18 @@ def synthesize(events, seed=5):
     """Sahne olaylarından (scene.Scene.events) stereo ses üretir: (örnek, 2) float32."""
     rng = np.random.default_rng(seed)
     mx = Mixer(events["duration"])
-    sweep, studio, out = events["sweep"], events["studio"], events["out"]
+    out = events["out"]
 
-    cube_pop(mx, events["pop"], rng)
-    charge(mx, events["pop"] + 0.08, events["burst"] - 0.012, rng)
-    impact(mx, events["burst"], rng)
-    block_clicks(mx, events["landings"], rng)
+    spin_in(mx, events["spin_in"][0], events["land"] - 0.01, *events["spin"], rng)
+    impact(mx, events["land"], rng)
+    for k, (a, b, x0, x1) in enumerate(events["moves"]):
+        swoosh(mx, a, b, x0, x1, rng)
+        if k < len(events["moves"]) - 1:
+            stop_thump(mx, b, x1, gain=0.35)
     letter_notes(mx, events["letters"])
-    resolve(mx, sweep[0], sweep[1], rng)
-    pad(mx, sweep[0] - 0.03, out[0] + 0.05, out[1] + 0.08, rng)
-    whoosh(mx, studio[0] - 0.05, 0.6, rng)
-    glint(mx, events["glint"][0] + 0.2)
+    resolve(mx, events["final"], rng)
+    pad(mx, events["final"] - 0.03, out[0] + 0.05, out[1] + 0.08, rng)
+    glint(mx, (events["glint"][0] + events["glint"][1]) / 2)
 
     mix = mx.dry + 0.4 * convolve(mx.send, reverb_ir(rng))
 

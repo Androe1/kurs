@@ -9,15 +9,15 @@ Hazır video: [`output/androe_studio_intro.mp4`](output/androe_studio_intro.mp4)
 
 ## Akış
 
-| Saniye    | Görüntü                                                        | Ses                                      |
-|-----------|----------------------------------------------------------------|------------------------------------------|
-| 0.2       | Beyaz bir yapı bloğu (üstü çıkıntılı küp) belirir              | yumuşak "pop"                            |
-| 0.6 - 0.9 | Küp dönerek sıkışır ve parlar                                  | yükselen enerji sesi                     |
-| 0.9       | Küp yüzlerce küçük bloğa ayrılarak patlar                      | derin bas vuruş, çatırtı                 |
-| 1.3 - 2.1 | Bloklar uçup ANDROE harflerini soldan sağa, alttan üste kurar  | tıkırtılar + her harfte yükselen bir nota |
-| 2.1 - 2.5 | Işık taraması blok harfleri pürüzsüz yazıya çevirir            | parlak çan, ışıltı, sıcak bir akor       |
-| 2.4 - 3.0 | Altında STUDIO açılır                                          | hafif hava sesi                          |
-| 4.3 - 4.9 | Logo yumuşakça kararır, video siyah biter                      | ses söner                                |
+| Saniye      | Görüntü                                                             | Ses                                  |
+|-------------|---------------------------------------------------------------------|--------------------------------------|
+| 0.1 - 0.7   | Beyaz, 3B eğik kare ikon derinlikten dönerek gelir                  | yaklaştıkça yükselen "vuuum"         |
+| 0.7         | İkon ekranın ortasına oturur                                        | derin vuruş, çatırtı, parlak çan     |
+| 0.9 - 1.4   | İkon küçülüp yuvarlanarak sağa gider, arkasından ANDROE çıkar       | whoosh + her harfe yükselen bir nota |
+| 1.7 - 2.3   | İkon sola döner: ANDROE'yi yutar, arkasından STUDIO çıkar           | whoosh + alçalan notalar             |
+| 2.6 - 3.1   | İkon yeniden sağa gider, STUDIO'yu iter, solundan ANDROE çıkar      | whoosh + notalar                     |
+| 3.1 - 4.3   | Logo "ANDROE [ikon] STUDIO" olarak oturur, üzerinden ışık geçer     | çan, ışıltı, sıcak akor              |
+| 4.3 - 4.9   | Logo yumuşakça kararır, video siyah biter                           | ses söner                            |
 
 ## Çalıştırma
 
@@ -38,13 +38,13 @@ Linux'ta `skia-python` için `libegl1` paketi gerekebilir (`sudo apt install lib
 ## Dosyalar
 
 - `intro.py` - kareleri ve sesi üretip ffmpeg ile MP4'e dönüştürür
-- `scene.py` - görsel sahne: küp, patlama, blok harfler, ışık taraması, yazı
+- `scene.py` - görsel sahne: 3B ikon, yazıların ikonun arkasından çıkışı, efektler
 - `sound.py` - ses tasarımı: tüm efektler numpy ile sentezlenir
 - `fonts/` - Montserrat yazı tipi (SIL Open Font License, bkz. `fonts/OFL.txt`)
 
 ## Düzenleme
 
-- Zamanlama: `scene.py` başındaki `T_...` sabitleri (ses de bunlara göre kendini ayarlar)
-- Yazılar: `WORD` ve `SUB`
-- Blok boyutu: `CELL` (küçüldükçe harfler daha çok bloktan oluşur)
+- Zamanlama: `scene.py` başındaki `T_IN`, `T_MOVES`, `T_GLINT`, `T_OUT` (ses de bunlara göre kendini ayarlar)
+- İkon: `ICON_TILT` (eğiklik), `ICON_HOLE` (delik), `ICON_DEPTH` (kalınlık), `ICON_BIG` / `ICON_SMALL` (boyut)
+- Yazı boyutu ve aralıklar: `FONT_SIZE`, `TRACK`, `GAP`
 - Notalar ve akor: `sound.py` içindeki `NOTES` ve `CHORD`
