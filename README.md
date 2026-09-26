@@ -48,3 +48,27 @@ Linux'ta `skia-python` için `libegl1` paketi gerekebilir (`sudo apt install lib
 - İkon: `ICON_TILT` (eğiklik), `ICON_HOLE` (delik), `ICON_DEPTH` (kalınlık), `ICON_BIG` / `ICON_SMALL` (boyut)
 - Yazı boyutu ve aralıklar: `FONT_SIZE`, `TRACK`, `GAP`
 - Notalar ve akor: `sound.py` içindeki `NOTES` ve `CHORD`
+
+---
+
+# NexDev - Intro Animasyonu (7 saniye)
+
+Hazır video: [`output/nexdev_intro.mp4`](output/nexdev_intro.mp4)
+(1920x1080, 60 fps, H.264 + AAC stereo). Renkler logodan: NEX beyaz, DEV sarı (#FFCC69).
+
+| Saniye      | Görüntü                                                                   | Ses                                   |
+|-------------|---------------------------------------------------------------------------|---------------------------------------|
+| 0.2 - 0.8   | Beş 3B küp takla atarak belirir: BUILD, VFX, SFX, MODELING, SCRIPTING      | blok "tok" sesleri + yükselen notalar |
+| 1.0 - 2.6   | Adları altlarında belirir, küpler dalga hâlinde sağa sola döner           | ışıltı, hafif akor zemini             |
+| 2.85 - 4.6  | Rubik küpü gibi sağa, sola, ileri, geri dönerek 2x3 dizilir, harfler çözülür | plastik "klak"lar, whoosh, gerilim    |
+| 4.6 - 5.4   | NEX / DEV oturur; küpler erir, harfler düz logoya toplanır                 | derin vuruş, çan, akor                |
+| 5.6 - 6.9   | Logonun üzerinden ışık geçer, video siyah biter                          | ses söner                             |
+
+```bash
+python nexdev.py                  # output/nexdev_intro.mp4
+python nexdev.py --still 4.0      # tek kareyi PNG kaydet
+```
+
+- `nexdev.py` - videoyu üretir
+- `nexdev_scene.py` - küpler, yüz dokuları (semboller ve harfler), Rubik dönüşleri, logo
+- `nexdev_sound.py` - NexDev ses tasarımı (sound.py'deki araçları kullanır)

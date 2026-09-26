@@ -197,6 +197,8 @@ class Word:
 # ---------------------------------------------------------------- sahne
 
 class Scene:
+    duration = DURATION
+
     def __init__(self, width=1920, height=1080, fps=60, seed=11):
         self.width, self.height, self.fps = width, height, fps
         self.k = width / W

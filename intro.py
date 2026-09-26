@@ -17,7 +17,7 @@ import imageio_ffmpeg
 import numpy as np
 import skia
 
-from scene import DURATION, Scene
+from scene import Scene
 from sound import synthesize, write_wav
 
 
@@ -37,7 +37,7 @@ def encode(scene, wav, out, fps):
            "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
            "-c:a", "aac", "-b:a", "320k", "-movflags", "+faststart", str(out)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-    frames = round(DURATION * fps)
+    frames = round(scene.duration * fps)
     for i in range(frames):
         proc.stdin.write(scene.render(i / fps).tobytes())
         print(f"\rKare {i + 1}/{frames}", end="", flush=True)
