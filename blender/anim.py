@@ -240,6 +240,28 @@ def apply_pose(ch, cam, pose, frame, interp="CONSTANT"):
                         kp.interpolation = interp
 
 
+def apply_keypose(ch, kp, frame, interp="CONSTANT"):
+    """fit_keyposes.py'nin çözdüğü pozu (kök + quaternion) kareye yazar; IK kapalı (FK'ye bake edilmiş)."""
+    arm = ch.arm
+    for pb in arm.pose.bones:
+        for con in pb.constraints:
+            con.influence = 0.0
+    arm.location = kp["loc"]
+    arm.rotation_mode = "XYZ"
+    arm.rotation_euler = [math.radians(a) for a in kp["rot"]]
+    arm.keyframe_insert("location", frame=frame)
+    arm.keyframe_insert("rotation_euler", frame=frame)
+    for pb in arm.pose.bones:
+        q = kp["quat"].get(pb.name)
+        pb.rotation_quaternion = q if q else (1, 0, 0, 0)
+        pb.keyframe_insert("rotation_quaternion", frame=frame)
+    if arm.animation_data and arm.animation_data.action:
+        for fc in arm.animation_data.action.fcurves:
+            for k in fc.keyframe_points:
+                if int(round(k.co.x)) == frame:
+                    k.interpolation = interp
+
+
 def screen_meta(ch, cam, frame):
     """Yüzün ve gövde ortasının ekran konumu (0-1, sol üst köşe başlangıç)."""
     from bpy_extras.object_utils import world_to_camera_view
@@ -266,8 +288,12 @@ def main():
     res = tuple(int(v) for v in args.res.split("x"))
     ch, cam = setup_scene(args.char, res, args.engine)
     keys = BLOCKING[args.char]
+    solved = json.loads((Path(__file__).with_name("keyposes.json")).read_text())
     for f, name in keys:
-        apply_pose(ch, cam, POSES[name], f)
+        if name in solved:
+            apply_keypose(ch, solved[name], f)
+        else:
+            apply_pose(ch, cam, POSES[name], f)
     frames = [int(f) for f in args.frames.split(",")] if args.frames else list(range(CHARS[args.char]["frames"] + 1))
     out = Path(args.out or ROOT / "renders" / f"char{args.char}")
     out.mkdir(parents=True, exist_ok=True)
