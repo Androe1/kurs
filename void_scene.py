@@ -87,12 +87,17 @@ SNAKES = (
 SNAKE_SPEED = 6500.0     # px/s
 SNAKE_TAIL = 800.0       # kenara ulaşmadan önceki görünür çizgi uzunluğu (px)
 
-# Logo + yazı (son hâl): logo VOID'in V'si, ardından "OID CREATIONS"
-TEXT = "OID CREATIONS"
-CAP = 100.0              # büyük harf yüksekliği = logo yüksekliği (px)
-TRACK = 0.0              # ek harf aralığı (em)
-# Fontun GPOS tablosundaki kerning (em; Figtree Black). V-O: logo ile O arası için
-KERN = {"VO": -0.020, "AT": -0.080}
+# Logo + yazı (son hâl): logo VOID'in V'si, ardından "OID CREATIONS". Yerleşim orijinal yazı
+# görselinden ölçüldü; birim büyük harf yüksekliği (= logo yüksekliği), x = 0 logonun sol kenarı,
+# y = 0 taban çizgisi. Harfler Inter Black (değer: harfin sol mürekkep kenarı); N görseldeki özel
+# çizim: düz kenarlı bir çokgen (Inter'in N'sinden dar, eğrisiz).
+CAP = 100.0              # büyük harf yüksekliği (px)
+LETTERS = (
+    ("O", 1.0595), ("I", 2.1569), ("D", 2.5571), ("C", 3.8343), ("R", 4.8942), ("E", 5.8121),
+    ("A", 6.6368), ("T", 7.6066), ("I", 8.5768), ("O", 8.9730), ("S", 11.0378),
+)
+N_POLY = ((10.0708, -1.0), (10.0708, 0.0), (10.3411, 0.0), (10.3411, -0.5354), (10.7080, 0.0),
+          (10.9346, 0.0), (10.9346, -1.0), (10.6629, -1.0), (10.6629, -0.4667), (10.3016, -1.0))
 
 # Zemin: perspektifteki bir düzlem (u, v px). Değerler referanstaki yerleşime göre seçildi.
 RINGS = (  # (u, v, yarıçap, kendi eğimi, kendi dönüşü) - açılar derece
@@ -337,36 +342,35 @@ class Backdrop:
 class Lockup:
     """Son hâl: [V logosu]OID CREATIONS, ekranın ortasında. Koordinatlar 1920x1080 alanında.
 
-    Logo VOID'in V'sidir: O harfi, fontun kendi V'si logonun yerinde dursaydı
-    nerede olacaksa oraya oturur (V'nin sağ kenarı = logonun sağ kenarı,
-    V-O kerning'i dahil). Logo yüksekliği büyük harf yüksekliğine eşittir.
+    Logo VOID'in V'sidir; harfler ve aralıklar orijinal yazı görselindeki gibidir
+    (LETTERS, N_POLY). Logo yüksekliği büyük harf yüksekliğine eşittir.
     """
 
     def __init__(self):
-        tf = skia.Typeface.MakeFromFile(str(FONTS / "Figtree-Black.ttf"))
+        tf = skia.Typeface.MakeFromFile(str(FONTS / "Inter-Black.ttf"))
         size = 100 * CAP / skia.Font(tf, 100).getMetrics().fCapHeight
         font = skia.Font(tf, size)
-        v = font.textToGlyphs("V")[0]
-        v_adv, v_right = font.getWidths([v])[0], font.getPath(v).computeTightBounds().right()
 
-        # x = 0 logonun sağ kenarı; y = 0 taban çizgisi
-        glyphs = font.textToGlyphs(TEXT)
+        # x = 0 logonun sol kenarı; y = 0 taban çizgisi
         self.text = skia.Path()
-        x = v_adv - v_right + KERN.get("V" + TEXT[0], 0.0) * size
-        for i, (g, adv) in enumerate(zip(glyphs, font.getWidths(glyphs))):
-            p = font.getPath(g)
-            p.offset(x, 0)
+        centers = []
+        for ch, x in LETTERS:
+            p = font.getPath(font.textToGlyphs(ch)[0])
+            b = p.computeTightBounds()
+            p.offset(x * CAP - b.left(), 0)
             self.text.addPath(p)
-            x += adv + (KERN.get(TEXT[i:i + 2], 0.0) + TRACK) * size
+            centers.append(x * CAP + b.width() / 2)
+        n_poly = np.array(N_POLY) * CAP
+        self.text.addPath(polyline(n_poly, closed=True))
+        centers.append(n_poly[:, 0].mean())
         ink = self.text.computeTightBounds()
 
-        logo_w = LOGO_ASPECT * CAP
-        self.x0 = CX - (logo_w + ink.right()) / 2
-        logo_right = self.x0 + logo_w
-        self.x1 = logo_right + ink.right()
-        self.logo_cx = self.x0 + logo_w / 2
-        self.text_x0 = logo_right + ink.left()
-        self.text.offset(logo_right, CY + CAP / 2)
+        self.x0 = CX - ink.right() / 2
+        self.x1 = self.x0 + ink.right()
+        self.logo_cx = self.x0 + LOGO_ASPECT * CAP / 2
+        self.text_x0 = self.x0 + ink.left()
+        self.letter_x = sorted(self.x0 + c for c in centers)   # harflerin ortaları (ses için)
+        self.text.offset(self.x0, CY + CAP / 2)
         self.logo = skia.Path()
         for poly in LOGO_PTS:
             self.logo.addPath(polyline(poly * CAP + [self.logo_cx, CY], closed=True))
@@ -457,8 +461,12 @@ class VoidScene:
                         if best is None or score > best[0]:
                             best = (score, i, step, d / length)
             _, i, step, d = best
-            lead = exit_distance(pts[i], -d) + 80
-            self.snakes.append(SimpleNamespace(copy=copy, arm=arm, t0=t0, start=i, step=step, lead=lead))
+            sn = SimpleNamespace(copy=copy, arm=arm, t0=t0, start=i, step=step,
+                                 lead=exit_distance(pts[i], -d) + 80)
+            path = self.snake_path(sn, pts)
+            sn.total = float(np.hypot(*np.diff(path, axis=0).T).sum())   # giriş + kontur uzunluğu
+            sn.entry_x = float(np.clip(path[0][0], 0, W))                # ekrana girdiği yer
+            self.snakes.append(sn)
 
     def snake_path(self, sn, pts):
         n = len(pts)
@@ -616,9 +624,30 @@ class VoidScene:
     # ------------------------------------------------------------ ses için olaylar
 
     def events(self):
-        arrivals = []
-        for sn in self.snakes:   # ışık çizgisinin logoya değdiği an (ses isterse kullanır)
-            arrivals.append(sn.t0 + sn.lead / SNAKE_SPEED)
-        return dict(duration=DURATION, bg_in=T_BG_IN, snakes=[sn.t0 for sn in self.snakes],
-                    arrivals=arrivals, turn=T_TURN, flashes=FLASHES, solid=T_SOLID, reveal=T_REVEAL,
-                    wipe=T_WIPE)
+        """Ses için olaylar: zamanlar (saniye) ve ekrandaki yatay konumlar (-1 sol .. 1 sağ).
+
+        Anlık olaylar (yanıp sönme, logonun dolması) göründükleri ilk karenin zamanına
+        yuvarlanır; ses görüntüyle aynı karede başlar.
+        """
+        lk = self.lockup
+
+        def frame(t):
+            return math.ceil(t * self.fps - 1e-6) / self.fps
+
+        def pan(t, x):
+            zoom, focus = lk.view(t)
+            return float(np.clip(2 * (CX + zoom * (x - focus)) / W - 1, -1, 1))
+
+        snakes = [dict(t0=sn.t0, arrive=sn.t0 + sn.lead / SNAKE_SPEED, done=sn.t0 + sn.total / SNAKE_SPEED,
+                       pan=2 * sn.entry_x / W - 1) for sn in self.snakes]
+        ts = np.arange(T_REVEAL[0], T_REVEAL[1] + FILL_LAG + 0.002, 0.001)
+        fill = np.array([lk.fronts(t)[1] for t in ts])
+        letters = []
+        for x in lk.letter_x:                  # dolgu cephesi harfin ortasından geçtiği an
+            t = float(ts[np.argmax(fill >= x)])
+            letters.append((t, pan(t, x)))
+        return dict(duration=DURATION, snakes=snakes, turn=T_TURN,
+                    flashes=[(frame(a), frame(b)) for a, b in FLASHES], solid=frame(T_SOLID),
+                    reveal=[(float(t), pan(t, lk.fronts(t)[0])) for t in np.linspace(*T_REVEAL, 24)],
+                    letters=letters,
+                    wipe=[(float(t), pan(t, lk.wipe(t))) for t in np.linspace(*T_WIPE, 16)])
