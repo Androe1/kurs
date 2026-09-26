@@ -37,6 +37,7 @@ TEX = 384                        # yüz dokusu çözünürlüğü
 SKILLS = ("build", "vfx", "sfx", "model", "script")
 LETTERS = (("N", WHITE), ("e", WHITE), ("x", WHITE), ("D", YELLOW), ("e", YELLOW), ("v", YELLOW))
 
+DUST_BOX = (380, 250, 1540, 830)  # toz parçacıklarının dolaştığı alan (köşelerden uzak)
 T_WAVE = 2.0                     # sembol küplerinin dalga dönüşü
 T_SNAP = 4.62                    # tüm harfler çözülür
 T_MELT = (4.75, 5.35)            # küpler erir, harfler logoya toplanır
@@ -130,6 +131,23 @@ def _letter_path(font, ch):
     return p
 
 
+def _centered_symbol(name, font_black):
+    """Sembolü ayrı bir yüzeye çizer, mürekkep sınırlarını ölçüp dokunun tam ortasına kaydırır."""
+    surf = skia.Surface(TEX, TEX)
+    with surf as c:
+        c.clear(skia.ColorTRANSPARENT)
+        _symbol(c, name, font_black)
+    ink = surf.toarray(colorType=skia.kRGBA_8888_ColorType)[..., 3] > 8
+    ys, xs = np.nonzero(ink)
+    dx = TEX / 2 - (xs.min() + xs.max() + 1) / 2
+    dy = TEX / 2 - (ys.min() + ys.max() + 1) / 2
+    out = skia.Surface(TEX, TEX)
+    with out as c:
+        c.clear(skia.ColorTRANSPARENT)
+        c.drawImage(surf.makeImageSnapshot(), dx, dy)
+    return out.makeImageSnapshot()
+
+
 def _face_texture(content, font_black):
     surf = skia.Surface(TEX, TEX)
     with surf as c:
@@ -143,7 +161,7 @@ def _face_texture(content, font_black):
         m = TEX * 0.03
         c.drawRoundRect(skia.Rect(m, m, TEX - m, TEX - m), TEX * 0.04, TEX * 0.04, border)
         if content in SKILLS:
-            _symbol(c, content, font_black)
+            c.drawImage(_centered_symbol(content, font_black), 0, 0)
         elif content != "blank":
             ch, rgb = content
             font = skia.Font(font_black, LETTER_ON_CUBE * TEX / CUBE)
@@ -229,6 +247,9 @@ class NexDevScene(Scene):
         self.textures = {c: _face_texture(c, self.black) for c in contents}
         rng = np.random.default_rng(seed)
         self._plan(rng)
+        self.dust = [(rng.uniform(DUST_BOX[0], DUST_BOX[2]), rng.uniform(DUST_BOX[1], DUST_BOX[3]),
+                      rng.uniform(-12, 12), rng.uniform(-18, -4), rng.uniform(1.0, 2.6), rng.uniform(0, 6.3),
+                      YELLOW if rng.random() < 0.45 else WHITE, rng.uniform(0.12, 0.4)) for _ in range(70)]
         self.sparks = []
         for i in range(48):
             x = CX + (rng.uniform(0, 6) - 3) * GRID_PITCH
@@ -315,6 +336,9 @@ class NexDevScene(Scene):
                                 skia.Paint(AntiAlias=True, Alphaf=alpha))
                 dim = skia.Paint(AntiAlias=True, Color4f=grey(0, alpha * (1 - min(shade, 1.0))))
                 c.drawRect(skia.Rect(0, 0, TEX, TEX), dim)
+                c.drawRect(skia.Rect(0, 0, TEX, TEX),       # kenarlarda ince ışık çizgisi
+                           skia.Paint(AntiAlias=True, Style=skia.Paint.kStroke_Style, StrokeWidth=TEX * 0.014,
+                                      Color4f=grey(1, alpha * 0.16 * shade)))
                 if flash > 0.01:
                     c.drawRect(skia.Rect(0, 0, TEX, TEX),
                                skia.Paint(AntiAlias=True, Color4f=grey(1, 0.3 * flash * alpha),
@@ -360,6 +384,86 @@ class NexDevScene(Scene):
             c.drawRect(skia.Rect(-h, -h, h, h), paint)
             c.restore()
 
+    def _draw_dust(self, c, t):
+        """Arka planda, ortada süzülen ince toz parçacıkları (köşelere hiç gitmez)."""
+        a = clamp01(t / 0.6)
+        if a <= 0:
+            return
+        paint = skia.Paint(AntiAlias=True)
+        for x, y, vx, vy, r, phase, rgb, depth in self.dust:
+            px = DUST_BOX[0] + (x + vx * t - DUST_BOX[0]) % (DUST_BOX[2] - DUST_BOX[0])
+            py = DUST_BOX[1] + (y + vy * t - DUST_BOX[1]) % (DUST_BOX[3] - DUST_BOX[1])
+            edge = min(px - DUST_BOX[0], DUST_BOX[2] - px, py - DUST_BOX[1], DUST_BOX[3] - py)
+            twinkle = 0.55 + 0.45 * math.sin(2 * math.pi * 0.7 * t + phase)
+            paint.setColor4f(color(rgb, a * depth * twinkle * clamp01(edge / 80)))
+            c.drawCircle(px, py, r, paint)
+
+    def _draw_pop_rings(self, c, t):
+        """Her küp belirdiğinde genişleyip sönen sarı kare halka."""
+        for cube in self.cubes:
+            u = (t - cube.pop - 0.08) / 0.45
+            if not 0 <= u <= 1:
+                continue
+            x, y = cube.state(t)[0][:2]
+            half = CUBE * (0.55 + 0.35 * (1 - (1 - u) ** 3))
+            c.drawRect(skia.Rect(x - half, y - half, x + half, y + half),
+                       skia.Paint(AntiAlias=True, Style=skia.Paint.kStroke_Style, StrokeWidth=3 * (1 - u) + 0.5,
+                                  Color4f=color(YELLOW, 0.55 * (1 - u) ** 2)))
+
+    def _draw_snap_light(self, c, t):
+        """Harfler çözüldüğünde: yatay ışık çizgisi ve sıcak bir parlama."""
+        d = t - T_SNAP
+        if d < 0 or d > 0.8:
+            return
+        u = d / 0.8
+        width = 1500 * (1 - (1 - min(d / 0.25, 1)) ** 3)
+        fade = (1 - u) ** 2
+        streak = skia.GradientShader.MakeLinear(
+            [skia.Point(CX - width / 2, CY), skia.Point(CX + width / 2, CY)],
+            [color(YELLOW, 0).toColor(), color((1, 0.95, 0.85), fade).toColor(), color(YELLOW, 0).toColor()])
+        for h, blur in ((2.5, 0), (14, 10)):
+            paint = skia.Paint(AntiAlias=True, Shader=streak, BlendMode=skia.BlendMode.kPlus)
+            if blur:
+                paint.setImageFilter(skia.ImageFilters.Blur(blur, blur))
+            c.drawRect(skia.Rect(CX - width / 2, CY - h / 2, CX + width / 2, CY + h / 2), paint)
+        glow = skia.GradientShader.MakeRadial(
+            skia.Point(CX, CY), 520, [color(YELLOW, 0.35 * fade).toColor(), color(YELLOW, 0).toColor()])
+        c.drawCircle(CX, CY, 520, skia.Paint(Shader=glow, BlendMode=skia.BlendMode.kPlus))
+
+    def _draw_backlight(self, c, t):
+        """Final logonun arkasındaki yumuşak, hafifçe nefes alan sarı hale."""
+        a = clamp01((t - T_MELT[0] - 0.2) / 0.6)
+        if a <= 0:
+            return
+        a *= 0.16 + 0.04 * math.sin(2 * math.pi * 0.8 * t)
+        left, right = self.logo_box
+        mid = (left + right) / 2
+        shader = skia.GradientShader.MakeRadial(
+            skia.Point(0, 0), 1, [color(YELLOW, a).toColor(), color(YELLOW, 0).toColor()])
+        c.save()
+        c.translate(mid, CY)
+        c.scale((right - left) * 0.75, 190)
+        c.drawCircle(0, 0, 1, skia.Paint(Shader=shader, BlendMode=skia.BlendMode.kPlus))
+        c.restore()
+
+    def _draw_reflection(self, c, t, cube_alpha, flash, logo_alpha):
+        """Küplerin ve logonun altta, zeminde silik yansıması."""
+        floor = CY + CUBE / 2 + 16
+        box = skia.Rect(CX - 900, floor, CX + 900, floor + 240)
+        c.saveLayer(box, skia.Paint(Alphaf=0.16))
+        c.save()
+        c.translate(0, 2 * floor)
+        c.scale(1, -1)
+        if cube_alpha > 0.003:
+            self._draw_cubes(c, t, cube_alpha, flash)
+        self._draw_logo(c, t, logo_alpha)
+        c.restore()
+        mask = skia.GradientShader.MakeLinear(
+            [skia.Point(0, floor), skia.Point(0, floor + 200)],
+            [grey(1, 1).toColor(), grey(1, 0).toColor()])
+        c.drawRect(box, skia.Paint(Shader=mask, BlendMode=skia.BlendMode.kDstIn))
+        c.restore()
+
     def _draw_glint(self, c, t):
         u = clamp01((t - T_GLINT[0]) / (T_GLINT[1] - T_GLINT[0]))
         if not 0 < u < 1:
@@ -400,14 +504,42 @@ class NexDevScene(Scene):
 
         melt = clamp01((t - T_MELT[0]) / (T_MELT[1] - T_MELT[0]))
         cube_alpha = 1 - ease_in_out_sine(clamp01(melt * 3.2 - 0.2))
+        flash = pulse(d, 0.05) if d > 0 else 0.0
+        logo_alpha = clamp01(melt * 5)
+        self._draw_dust(c, t)
+        self._draw_backlight(c, t)
+        self._draw_reflection(c, t, cube_alpha, flash, logo_alpha)
+        self._draw_pop_rings(c, t)
         if cube_alpha > 0.003:
-            self._draw_cubes(c, t, cube_alpha, pulse(d, 0.05) if d > 0 else 0.0)
+            self._draw_cubes(c, t, cube_alpha, flash)
         self._draw_sparks(c, t)
-        self._draw_logo(c, t, clamp01(melt * 5))
+        self._draw_logo(c, t, logo_alpha)
+        self._draw_snap_light(c, t)
         self._draw_glint(c, t)
         if fade > 0:
             c.restore()
         c.restore()
+
+    def _bloom(self, rgb):
+        """Parlama yalnızca harflerin etrafına hale ekler; içlerindeki logo rengini değiştirmez.
+
+        Toplamalı parlama sarıyı açıp soluklaştırırdı; "lighten" ile her pikselde
+        özgün renk ile bulanık hâlin parlak olanı seçilir.
+        """
+        if not rgb.any():
+            return rgb
+        rgba = np.dstack([rgb, np.full(rgb.shape[:2], 255, np.uint8)])
+        img = skia.Image.fromarray(rgba, colorType=skia.kRGBA_8888_ColorType)
+        with self.surface as c:
+            c.clear(skia.ColorBLACK)
+            c.drawImage(img, 0, 0)
+            for sigma, amount in ((12.0, 0.6), (40.0, 0.35)):
+                c.saveLayer(None, skia.Paint(BlendMode=skia.BlendMode.kLighten))
+                c.drawImage(img, 0, 0, skia.SamplingOptions(),
+                            skia.Paint(Alphaf=amount,
+                                       ImageFilter=skia.ImageFilters.Blur(sigma * self.k, sigma * self.k)))
+                c.restore()
+        return self.surface.toarray(colorType=skia.kRGBA_8888_ColorType)[..., :3].copy()
 
     def samples(self, t):
         if 0.15 < t < T_MELT[1] + 0.2:
