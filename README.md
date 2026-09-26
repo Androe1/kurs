@@ -127,3 +127,38 @@ python glitch_intro.py --still 4.6      # tek kareyi PNG kaydet
 - `output/taslak/` - onay için storyboard, hareket önizlemesi ve referansla senkron karşılaştırma
 
 Linux'ta sunucuda çalıştırmak için `libegl1` gerekir (ekran kartı gerekmez, llvmpipe ile çalışır).
+
+---
+
+# Void Creations - Intro (4.4 saniye)
+
+Hazır video: [`output/void_creations_intro.mp4`](output/void_creations_intro.mp4)
+(1920x1080, 60 fps, H.264 + AAC stereo). Referans videonun ilk 4 saniyesindeki animasyon;
+ekranda logo ve yazıdan başka hiçbir şey yok. V logosu VOID'in V'sidir: **[V]OID CREATIONS**.
+
+| Saniye       | Görüntü                                                                                          | Ses                                          |
+|--------------|--------------------------------------------------------------------------------------------------|----------------------------------------------|
+| 0.36 - 1.2   | Perspektifte teknik çizim zemini belirir (daireler, taralı bantlar, işaretler, kılavuz çizgiler); ekran dışından gelen ışık çizgileri köşelerde dönerek V logosunun 3B'de üst üste dizili beş kopyasını çizer | sessizlikten kabaran koyu pad (Si♭maj7♯11) |
+| 1.48 - 2.17  | Kamera logoya döner, kopyalar tek logoda birleşir; öndeki kopya hızlanan aralıklarla dolu beyaz yanıp söner, zemin kararır | Si♭ bası güçlenerek girer |
+| 2.2 - 2.8    | Logo dolar, küçülüp sola kayarak VOID'in V'si olur; OID CREATIONS önce ince kontur, ardından eğik bir dolgu cephesiyle soldan sağa belirir | akor tam güçte, bas nefes alır |
+| 3.47 - 3.73  | Logonun eğimiyle (18.3°) aynı açıda bir silme her şeyi soldan sağa siler                          | bas Sol'e iner                               |
+| 3.73 - 4.4   | siyah                                                                                            | ses söner                                    |
+
+```bash
+python void_creations.py                 # output/void_creations_intro.mp4
+python void_creations.py --still 1.3     # tek kareyi PNG kaydet
+```
+
+- `void_creations.py` - videoyu üretir
+- `void_scene.py` - sahne: perspektifteki zemin, ışık çizgileri (trim path), 3B kopya yığını,
+  birleşme ve yanıp sönme, yazının kontur + dolgu açılışı, eğik silme. V logosu vektör olarak
+  (`LOGO`, iki dörtgen) tanımlı; köşeler logo görselinin kenarlarına alt piksel doğrulukla oturtuldu
+- `void_sound.py` - ses tasarımı (numpy ile sentez; hazır ses kullanılmaz). Akorlar ve seviye
+  eğrileri referansın spektrumundan ölçüldü
+- `fonts/Figtree-Black.ttf` - Figtree değişken yazı tipinden üretilmiş Black (900) örneği (SIL Open
+  Font License, bkz. `fonts/Figtree-LICENSE.txt`); kerning çiftleri (A-T, V-O) fontun GPOS tablosundan
+- `output/taslak/void_storyboard.png` - bitmiş videodan 12 anahtar kare
+
+Düzenleme: zamanlama `void_scene.py` başındaki `T_*`, `FLASHES`, `COLLAPSE`; yığın `STACK_*`, `TILT`,
+`SPIN`; yazı `TEXT`, `CAP`, `KERN`; ses akorları ve seviye eğrileri `void_sound.py` başında.
+`output/taslak/void_karsilastirma.mp4`: üstte referans, altta bizim; önce referansın sesiyle, sonra bizimkiyle.
