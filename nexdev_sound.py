@@ -4,7 +4,7 @@ Androe intro'sunun ses araçlarını (sound.py) kullanır; zamanlamalar
 nexdev_scene.NexDevScene.events() içinden gelir.
 
   küpler belirir     -> tok blok sesi + yükselen nota (Do Re Mi Sol La)
-  yazılar çıkar      -> hafif ışıltı
+  küpler dalgalanır  -> hafif ışıltı
   her küp dönüşü     -> Rubik küpü gibi plastik "klak"
   küpler toplanır    -> whoosh, ardından yükselen gerilim
   harfler çözülür    -> derin vuruş, çan, sıcak akor
@@ -78,7 +78,7 @@ def synthesize(events, seed=9):
         block_pop(mx, t, x, NOTES[i % len(NOTES)])
     for t0, t1, x in events["flips"]:
         cube_turn(mx, t0, t1, x, rng)
-    sparkle(mx, events["labels"][0], rng)
+    sparkle(mx, events["wave"], rng)
     pad(mx, events["pops"][0][0], events["gather"][0], events["gather"][1], rng)   # sembollerin altında zemin
     whoosh(mx, *events["gather"], rng)
     riser(mx, events["gather"][1], events["snap"] - 0.01, rng)

@@ -2,16 +2,19 @@
 
 Akış (saniye):
   0.2   Simsiyah ekranda beş küp sırayla takla atarak belirir; ön yüzlerinde
-        stüdyonun işleri: BUILD, VFX, SFX, MODELING, SCRIPTING. Adları altlarında.
+        stüdyonun işlerinin sembolleri: çekiç (build), parıltı (VFX),
+        hoparlör (SFX), tel kafes küp (modelleme), </> (script).
   2.0   Küpler dalga hâlinde sağa sola döner.
-  2.85  Rubik küpü gibi karışırlar: sağa, sola, ileri, geri dönerken 2x3
+  2.85  Rubik küpü gibi karışırlar: sağa, sola, ileri, geri dönerken tek sıraya
         dizilirler, altıncı küp de gelir.
-  4.0   Her küp son kez döner ve harfler çözülür: NEX (beyaz) / DEV (sarı).
-  4.75  Küplerin gövdesi erir, harfler toplanıp düz logoya dönüşür.
+  4.0   Her küp son kez döner ve logonun harfleri çözülür: N e x D e v.
+  4.75  Küplerin gövdesi erir, harfler toplanıp "NexDev" logosuna dönüşür
+        (Inter Black; Nex beyaz, Dev sarı - logonun aynısı).
   5.6   Logonun üzerinden ışık geçer; 6.35'ten sonra her şey kararır.
 
-Küp yüzlerindeki semboller ve harfler dokudur (texture); küp döndükçe
-perspektifle birlikte eğilirler. Tüm ölçüler 1920x1080 tasarım alanındadır.
+Ekranda logodan başka yazı yoktur. Küp yüzlerindeki semboller ve harfler
+dokudur (texture); küp döndükçe perspektifle birlikte eğilirler.
+Tüm ölçüler 1920x1080 tasarım alanındadır.
 """
 import math
 
@@ -19,7 +22,7 @@ import numpy as np
 import skia
 
 from scene import (CX, CY, FOCAL, FONTS, W, Scene, clamp01, ease_in_out_cubic, ease_in_out_sine,
-                   ease_out_cubic, grey, progress, project, pulse, rot_x, rot_y)
+                   grey, progress, project, pulse, rot_x, rot_y)
 
 DURATION = 7.0
 YELLOW = (1.0, 0.8, 0.41)        # logodaki sarı (#FFCC69)
@@ -27,22 +30,21 @@ WHITE = (1.0, 1.0, 1.0)
 FACE = (0.085, 0.085, 0.09)      # küp yüzü rengi
 
 CUBE = 152.0                     # küp kenarı (px)
-ROW_PITCH = 245.0                # ilk sıradaki küpler arası
-GRID_PITCH = CUBE + 18           # 2x3 dizilişte küpler arası
+ROW_PITCH = 205.0                # sembol sırasındaki küpler arası
+GRID_PITCH = CUBE + 16           # harf sırasındaki küpler arası
 TEX = 384                        # yüz dokusu çözünürlüğü
 
 SKILLS = ("build", "vfx", "sfx", "model", "script")
-LABELS = ("BUILD", "VFX", "SFX", "MODELING", "SCRIPTING")
-LETTERS = (("N", WHITE), ("E", WHITE), ("X", WHITE), ("D", YELLOW), ("E", YELLOW), ("V", YELLOW))
+LETTERS = (("N", WHITE), ("e", WHITE), ("x", WHITE), ("D", YELLOW), ("e", YELLOW), ("v", YELLOW))
 
-T_LABELS = (1.05, 2.6)           # yazıların görünür olduğu aralık
+T_WAVE = 2.0                     # sembol küplerinin dalga dönüşü
 T_SNAP = 4.62                    # tüm harfler çözülür
 T_MELT = (4.75, 5.35)            # küpler erir, harfler logoya toplanır
 T_GLINT = (5.6, 6.1)
 T_OUT = (6.35, 6.92)
 
-LOGO_SIZE, LOGO_TRACK, LOGO_GAP = 180.0, 0.02, 30.0
-LETTER_ON_CUBE = 128.0           # küp yüzündeki harfin punto karşılığı
+LOGO_SIZE, LOGO_TRACK = 206.0, -0.018  # logodaki Inter Black, sıkı harf aralığı
+LETTER_ON_CUBE = 130.0           # küp yüzündeki harfin punto karşılığı
 
 LIGHT = np.array([-0.35, -0.5, -0.8]) / np.linalg.norm([-0.35, -0.5, -0.8])
 _V = np.array([[x, y, z] for x in (-.5, .5) for y in (-.5, .5) for z in (-.5, .5)])
@@ -100,7 +102,7 @@ def _symbol(c, name, font_black):
         for q in hexagon:
             c.drawCircle(*q, 9, fill)
     elif name == "script":                       # kod: </>
-        font = skia.Font(font_black, 92)
+        font = skia.Font(font_black, 96)
         blob = skia.TextBlob("</>", font)
         b = blob.bounds()
         c.drawTextBlob(blob, -(b.left() + b.right()) / 2, 34, fill)
@@ -117,10 +119,14 @@ def _poly(points):
 
 
 def _letter_path(font, ch):
-    """Harf yolu; mürekkebi (0, 0) noktasında ortalanmış."""
+    """Harf yolu: yatayda mürekkep ortası x=0; büyük harf yüksekliğinin ortası y=0.
+
+    Böylece küçük harfler (e, x, v) büyüklerle aynı taban çizgisine oturur,
+    tıpkı logodaki gibi.
+    """
     p = font.getPath(font.textToGlyphs(ch)[0])
     b = p.computeTightBounds()
-    p.offset(-(b.left() + b.right()) / 2, -(b.top() + b.bottom()) / 2)
+    p.offset(-(b.left() + b.right()) / 2, font.getMetrics().fCapHeight / 2)
     return p
 
 
@@ -218,27 +224,35 @@ class NexDevScene(Scene):
         self.k = width / W
         self.surface = skia.Surface(width, height)
         self.to_linear = ((np.arange(256) / 255.0) ** 2.2).astype(np.float32)
-        self.black = skia.Typeface.MakeFromFile(str(FONTS / "Montserrat-Black.ttf"))
-        self.semi = skia.Typeface.MakeFromFile(str(FONTS / "Montserrat-SemiBold.ttf"))
+        self.black = skia.Typeface.MakeFromFile(str(FONTS / "Inter-Black.ttf"))
         contents = ["blank", *SKILLS, *LETTERS]
         self.textures = {c: _face_texture(c, self.black) for c in contents}
-        self._plan(np.random.default_rng(seed))
+        rng = np.random.default_rng(seed)
+        self._plan(rng)
+        self.sparks = []
+        for i in range(48):
+            x = CX + (rng.uniform(0, 6) - 3) * GRID_PITCH
+            ang = rng.uniform(0, 2 * math.pi)
+            speed = rng.uniform(250, 700)
+            self.sparks.append((x, CY + rng.uniform(-60, 60), math.cos(ang) * speed * 1.3,
+                                math.sin(ang) * speed, rng.uniform(4, 10), rng.uniform(-400, 400),
+                                rng.uniform(0.4, 0.85), YELLOW if x > CX else WHITE))
         self._logo()
 
     def _plan(self, rng):
-        row_y = CY - 24
-        grid = [(CX + (i % 3 - 1) * GRID_PITCH, CY + (i // 3 - 0.5) * GRID_PITCH) for i in range(6)]
+        row_y = CY
+        grid = [(CX + (i - 2.5) * GRID_PITCH, CY) for i in range(6)]
         self.cubes = []
         for i in range(6):
             if i < 5:
                 cube = Cube((CX + (i - 2) * ROW_PITCH, row_y), 0.2 + 0.13 * i, "blank")
                 cube.turns.append((cube.pop, cube.pop + 0.42, "x", -1, SKILLS[i]))    # takla ile belir
-                t = 2.0 + 0.07 * i                                                     # dalga
+                t = T_WAVE + 0.07 * i                                                  # dalga
                 cube.turns.append((t, t + 0.34, "y", 1 if i % 2 else -1, SKILLS[i]))
             else:
                 cube = Cube((grid[5][0] + 420, grid[5][1]), 3.0, SKILLS[rng.integers(5)])
             # Rubik karışması: sağ/sol/ileri/geri dönüşler, sonra harf çözülür
-            wave = 0.06 * (i % 3) + 0.05 * (i // 3)
+            wave = 0.045 * i
             scramble = [SKILLS[(i + k + 1) % 5] for k in range(2)]
             plan = [(2.85, 0.42, "y" if i % 2 else "x", 1 if i < 3 else -1, scramble[0]),
                     (3.42, 0.34, "x" if i % 2 else "y", -1 if i % 3 else 1, scramble[1]),
@@ -251,23 +265,19 @@ class NexDevScene(Scene):
             self.cubes.append(cube)
 
     def _logo(self):
-        """Son logo: NEX (beyaz) üstte, DEV (sarı) altta, ortalanmış."""
+        """Son logo: tek satır "NexDev" (Nex beyaz, Dev sarı), ekranda ortalanmış."""
         font = skia.Font(self.black, LOGO_SIZE)
-        cap = font.getMetrics().fCapHeight
-        self.logo = []
-        for row, word in enumerate(("NEX", "DEV")):
-            glyphs = font.textToGlyphs(word)
-            xs, x = [], 0.0
-            for g, adv in zip(glyphs, font.getWidths(glyphs)):
-                b = font.getPath(g).computeTightBounds()
-                xs.append(x + (b.left() + b.right()) / 2)
-                x += adv + LOGO_TRACK * LOGO_SIZE
-            first = font.getPath(glyphs[0]).computeTightBounds().left()
-            last = xs[-1] + font.getPath(glyphs[-1]).computeTightBounds().width() / 2
-            offset = CX - (first + last) / 2
-            y = CY + (row - 0.5) * (cap + LOGO_GAP)
-            for ch, cx in zip(word, xs):
-                self.logo.append((cx + offset, y))
+        text = "".join(ch for ch, _ in LETTERS)
+        glyphs = font.textToGlyphs(text)
+        centers, bounds, x = [], [], 0.0
+        for g, adv in zip(glyphs, font.getWidths(glyphs)):
+            b = font.getPath(g).computeTightBounds()
+            centers.append(x + (b.left() + b.right()) / 2)
+            bounds.append((x + b.left(), x + b.right()))
+            x += adv + LOGO_TRACK * LOGO_SIZE
+        offset = CX - (bounds[0][0] + bounds[-1][1]) / 2
+        self.logo = [(cx + offset, CY) for cx in centers]
+        self.logo_box = (bounds[0][0] + offset, bounds[-1][1] + offset)
         self.letter_paths = [_letter_path(skia.Font(self.black, 100), ch) for ch, _ in LETTERS]
 
     # ------------------------------------------------------------ çizim
@@ -311,28 +321,6 @@ class NexDevScene(Scene):
                                           BlendMode=skia.BlendMode.kPlus))
                 c.restore()
 
-    def _draw_labels(self, c, t):
-        a = min(clamp01((t - T_LABELS[0]) / 0.35), clamp01((T_LABELS[1] - t) / 0.25))
-        if a <= 0:
-            return
-        font = skia.Font(self.semi, 24)
-        for i, text in enumerate(LABELS):
-            local = clamp01((t - T_LABELS[0] - 0.07 * i) / 0.3) if t < T_LABELS[1] - 0.25 else a
-            if local <= 0:
-                continue
-            glyphs = font.textToGlyphs(text)
-            widths = font.getWidths(glyphs)
-            track = 0.22 * 24
-            total = sum(widths) + track * (len(widths) - 1)
-            x = CX + (i - 2) * ROW_PITCH - total / 2
-            y = CY - 24 + CUBE / 2 + 62 + 10 * (1 - ease_out_cubic(local))
-            paint = skia.Paint(AntiAlias=True, Color4f=grey(1, 0.92 * local))
-            for g, w in zip(glyphs, widths):
-                p = font.getPath(g)
-                p.offset(x, y)
-                c.drawPath(p, paint)
-                x += w + track
-
     def _draw_logo(self, c, t, fade_in):
         """Küpler erirken yüzlerdeki harflerin yerini alan, toplanıp logoya dönüşen düz harfler."""
         if fade_in <= 0:
@@ -353,15 +341,35 @@ class NexDevScene(Scene):
             c.drawPath(self.letter_paths[i], skia.Paint(AntiAlias=True, Color4f=color(LETTERS[i][1], fade_in)))
             c.restore()
 
+    def _draw_sparks(self, c, t):
+        """Harfler çözüldüğünde küplerden saçılan küçük sarı ve beyaz kareler."""
+        d = t - T_SNAP
+        if d < 0 or d > 0.9:
+            return
+        paint = skia.Paint(AntiAlias=True)
+        for x, y, vx, vy, size, spin, life, rgb in self.sparks:
+            if d > life:
+                continue
+            u = d / life
+            travel = 0.25 * (1 - math.exp(-d / 0.25))
+            h = size * (1 - 0.6 * u) / 2
+            paint.setColor4f(color(rgb, 0.9 * (1 - u) ** 1.5))
+            c.save()
+            c.translate(x + vx * travel, y + vy * travel)
+            c.rotate(spin * d)
+            c.drawRect(skia.Rect(-h, -h, h, h), paint)
+            c.restore()
+
     def _draw_glint(self, c, t):
         u = clamp01((t - T_GLINT[0]) / (T_GLINT[1] - T_GLINT[0]))
         if not 0 < u < 1:
             return
-        box = skia.Rect(CX - 420, CY - 260, CX + 420, CY + 260)
+        left, right = self.logo_box
+        box = skia.Rect(left - 120, CY - 200, right + 120, CY + 200)
         c.saveLayer(box, skia.Paint(BlendMode=skia.BlendMode.kPlus, Alphaf=0.6 * math.sin(math.pi * u),
                                     ImageFilter=skia.ImageFilters.Blur(10, 10)))
         self._draw_logo(c, T_MELT[1] + 1, 1.0)
-        center = CX - 400 + 800 * ease_in_out_sine(u)
+        center = left - 100 + (right - left + 200) * ease_in_out_sine(u)
         n = np.array([math.cos(math.radians(20)), math.sin(math.radians(20))])
         mid = np.array([center, CY])
         shader = skia.GradientShader.MakeLinear(
@@ -394,7 +402,7 @@ class NexDevScene(Scene):
         cube_alpha = 1 - ease_in_out_sine(clamp01(melt * 3.2 - 0.2))
         if cube_alpha > 0.003:
             self._draw_cubes(c, t, cube_alpha, pulse(d, 0.05) if d > 0 else 0.0)
-        self._draw_labels(c, t)
+        self._draw_sparks(c, t)
         self._draw_logo(c, t, clamp01(melt * 5))
         self._draw_glint(c, t)
         if fade > 0:
@@ -418,5 +426,5 @@ class NexDevScene(Scene):
             for t0, t1, *_ in cube.turns:
                 gx = (cube.state(t1)[0][0]) / W
                 flips.append((t0, t1, gx))
-        return dict(duration=DURATION, pops=pops, flips=flips, labels=T_LABELS, gather=(2.85, 3.5),
+        return dict(duration=DURATION, pops=pops, flips=flips, wave=T_WAVE, gather=(2.85, 3.5),
                     snap=T_SNAP, melt=T_MELT, glint=T_GLINT, out=T_OUT)
