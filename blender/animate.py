@@ -119,49 +119,60 @@ class Track:
 
 # ---------------------------------------------------------------- koreografi
 
-def choreo(char, bones):
-    """(anahtarlar, squash anahtarları, vuruş karesi, özel katmanlar) döndürür."""
-    Z = rest(bones)
-    if char == 1:
-        H, D = Pose.from_key("c1_hit"), Pose.from_key("c1_hold")
-        keys = [
-            (0, H.blend(Z, 0.45, bones).moved((2.2, 0.4, -7.5), (-30, 0, 20))),   # sağ alttan fırlar
-            (5, H.blend(Z, 0.2, bones).moved((0.9, 0.15, -2.2), (-12, 0, 8))),
-            (8, H.blend(Z, 0.05, bones).moved((0.15, 0.0, -0.25), (-2, 0, 1))),
-            (9, H.moved((0.0, 0.0, 0.14))),                                         # hafif aşma
-            (10, H.moved((0.0, 0.0, 0.08))),                                        # vuruş pozu
-            (13, H),
-            (16, H.blend(D, 0.3, bones)),                                           # oturma
-            (25, D),                                                                # hold ortası
-            (33, D.moved((0, -0.1, -0.12))),                                        # yavaşça çöker
-            (36, D.blend(Z, 0.22, bones).moved((0, -0.15, 0.1))),                   # toplanma
-            (39, D.moved((0.1, -0.35, -2.0), (12, 0, -4))),                         # düşüş (kameraya)
-            (42, D.moved((0.3, -0.9, -7.5), (25, 0, -10))),
-        ]
-        squash = [(0, 1.1), (5, 1.08), (9, 0.95), (11, 1.02), (13, 1.0), (34, 1.0), (36, 0.93),
-                  (38, 1.08), (42, 1.1)]
-        return keys, squash, 10, {"swim": (12, 36), "float": (14, 34)}
-    H, D = Pose.from_key("c2_hit"), Pose.from_key("c2_hold")
-    keys = [
-        (0, H.blend(Z, 0.55, bones).moved((-0.6, 0.3, -6.5), (0, 0, 55))),         # şeridin arkasından
-        (6, H.blend(Z, 0.35, bones).moved((-0.3, 0.15, -2.6), (0, 0, 30))),        # kendi sağına dönerek
-        (11, H.blend(Z, 0.12, bones).moved((0.0, 0.0, -0.6), (0, 0, 8))),
-        (14, H.blend(Z, 0.02, bones).moved((0.0, 0.0, 0.12), (0, 0, 1))),          # aşma
-        (16, H.moved((0.0, 0.0, 0.06))),                                           # vuruş pozu
-        (19, H.moved((0.0, 0.0, -0.02), (0, 0, -2))),
-        (22, H.blend(D, 0.3, bones)),                                              # oturma
-        (33, D),                                                                   # hold ortası
-        (40, D.moved((0.0, 0.0, -0.1), (0, 0, -12))),                             # kendi sağına dönmeye devam
-        (43, D.blend(Z, 0.2, bones).moved((0.0, 0.0, 0.12), (0, 0, -15))),          # toplanma
-        (46, D.moved((0.3, -0.4, -2.0), (0, 0, -24))),                             # süzülüp düşer
-        (49, D.moved((0.6, -1.0, -6.5), (0, 0, -40))),
-    ]
-    squash = [(0, 1.1), (11, 1.05), (14, 0.95), (17, 1.03), (20, 1.0), (41, 1.0), (43, 0.93),
-              (45, 1.08), (49, 1.1)]
-    return keys, squash, 16, {"float": (20, 41)}
+# Karakter başına: anahtar pozların kareleri ve fizik ayarları
+CHOREO = {
+    1: {"hit": ("c1_hit", 10), "hold": ("c1_hold", 25), "launch_blend": 0.4, "swim": (8, 38),
+        "spin": 0.0, "apex": 19},
+    2: {"hit": ("c2_hit", 16), "hold": ("c2_hold", 33), "launch_blend": 0.5, "swim": None,
+        "spin": -1.2, "apex": 24},        # rad/s: kendi sağına (üstten bakınca saat yönünde) dönmeye devam eder
+}
+GRAVITY = 150.0              # stud/s²  (karakter 6 stud boyunda; çizgi film yerçekimi, gerçeğin ~4.5 katı)
 
 
-# ---------------------------------------------------------------- fizik katmanları
+class Ballistic:
+    """Kökün yörüngesi: sabit yerçekimli parabol + sabit yatay momentum.
+
+    Vuruş (fa) ve hold (fb) karelerindeki çözülmüş kök konumlarından geçer; tepe anı
+    ta ve tepe yüksekliği za bu iki noktadan ve g'den hesaplanır. Hız hiçbir karede
+    sıçramaz, ivme her karede aynıdır (gerçek serbest uçuş)."""
+
+    def __init__(self, H, D, fa, fb, apex=None):
+        g = GRAVITY / FPS ** 2                                     # stud / kare²
+        self.g = g
+        zh, zd = H.loc[2], D.loc[2]
+        self.ta = (fa + fb) / 2 - (zh - zd) / (g * (fb - fa))
+        self.za = zh + g / 2 * (fa - self.ta) ** 2
+        if apex is not None:                                       # tepe anı pencere ortasında
+            self.za = max(zh, zd) + 0.25
+            self.ta = apex
+        self.v = (D.loc[:2] - H.loc[:2]) / (fb - fa)
+        self.p = H.loc[:2]
+        self.fa = fa
+
+        # Havada kalma (hang time): yerçekimi tepe anının çevresinde yumuşakça %60 azalır.
+        # Hız yine süreklidir; yalnızca tepe civarındaki yavaşlık uzar (trambolin hissi).
+        self.hang = (0.6, 7.0)
+        fs = np.arange(-40.0, 140.0, 0.05)
+        gg = self.g * (1 - self.hang[0] * np.exp(-((fs - self.ta) / self.hang[1]) ** 2))
+        i0 = int(np.argmin(abs(fs - self.ta)))
+        v = np.zeros_like(fs)
+        z = np.zeros_like(fs)
+        z[i0] = self.za
+        for i in range(i0 + 1, len(fs)):                       # tepeden ileri
+            v[i] = v[i - 1] - gg[i - 1] * 0.05
+            z[i] = z[i - 1] + (v[i - 1] + v[i]) / 2 * 0.05
+        for i in range(i0 - 1, -1, -1):                        # tepeden geri
+            v[i] = v[i + 1] + gg[i + 1] * 0.05
+            z[i] = z[i + 1] - (v[i + 1] + v[i]) / 2 * 0.05
+        self.fs, self.zs, self.vs = fs, z, v
+
+    def __call__(self, f):
+        xy = self.p + self.v * (f - self.fa)
+        return np.array([xy[0], xy[1], float(np.interp(f, self.fs, self.zs))])
+
+    def vz(self, f):
+        return float(np.interp(f, self.fs, self.vs)) * FPS          # stud/s
+
 
 def spring(target, dt, freq, zeta):
     """Sönümlü yay: x'' = w²(hedef - x) - 2ζw x'  (alt adımlarla)."""
@@ -186,122 +197,152 @@ def world_rot_about(axis, deg):
     return R.from_rotvec(axis / n * math.radians(deg)).as_matrix()
 
 
+BONE_SPRING = {  # (frekans Hz, sönüm): gövde sert, uçlar gevşek -> doğal overlap
+    "LowerTorso": (8.0, 0.8), "UpperTorso": (7.0, 0.7), "Head": (5.0, 0.5),
+    "LeftUpperArm": (5.0, 0.45), "RightUpperArm": (5.0, 0.45), "LeftLowerArm": (4.5, 0.4),
+    "RightLowerArm": (4.5, 0.4), "LeftHand": (4.0, 0.4), "RightHand": (4.0, 0.4),
+    "LeftUpperLeg": (5.5, 0.5), "RightUpperLeg": (5.5, 0.5), "LeftLowerLeg": (5.0, 0.45),
+    "RightLowerLeg": (5.0, 0.45), "LeftFoot": (4.5, 0.4), "RightFoot": (4.5, 0.4),
+}
+
+
+class Spring3:
+    """Vektör için sönümlü yay (kemik dönüşünün log-uzay vektörü)."""
+
+    def __init__(self, x0, freq, zeta):
+        self.x = np.array(x0, float)
+        self.v = np.zeros(3)
+        self.w, self.z = 2 * math.pi * freq, zeta
+
+    def step(self, target, dt, sub=12):
+        h = dt / sub
+        for _ in range(sub):
+            a = self.w ** 2 * (target - self.x) - 2 * self.z * self.w * self.v
+            self.v += a * h
+            self.x += self.v * h
+        return self.x
+
+
 def bake(char, ch, cam, nframes):
     bones = [b.name for b in ch.arm.data.bones]
     sk = posefit.Skeleton(ch.arm)
-    keys, squash, hit_f, extra = choreo(char, bones)
-    fr = [k[0] for k in keys]
-    loc_t = Track(fr, vecs=[k[1].loc for k in keys])
-    if "float" in extra:
-        a0, a1 = extra["float"]
-        base_loc = loc_t
+    cfg = CHOREO[char]
+    H, fa = Pose.from_key(cfg["hit"][0]), cfg["hit"][1]
+    D, fb = Pose.from_key(cfg["hold"][0]), cfg["hold"][1]
+    Z = rest(bones)
+    traj = Ballistic(H, D, fa, fb, cfg.get("apex"))
 
-        class Floating:
-            """Hold boyunca trambolin sonrası hafif süzülme: ~0.5 s periyotlu, sönen iniş-çıkış."""
-            f = base_loc.f
+    # hedef pozlar: fırlarken toplu, vuruş, hold; sonrası hold (düşüşte kollar/bacaklar fizikle kalkar)
+    launch = H.blend(Z, cfg["launch_blend"], bones)
+    key_f = [0, fa, fb, nframes + 8]
+    key_p = [launch, H, D, D]
+    bone_t = {b: Track(key_f, rots=[p.bone(b) for p in key_p]) for b in bones}
 
-            def __call__(self, fr_):
-                return base_loc(fr_) + np.array([0, 0, self._bob(fr_)])
+    # kök dönüşü: vuruş->hold arasındaki açısal hız, öncesinde ve sonrasında sönerek sürer
+    dR = (H.rot.inv() * D.rot).as_rotvec() / (fb - fa)             # rad / kare (kök uzayında)
+    def root_target(f):
+        if f < fa:
+            k = -(1 - math.exp(-(fa - f) / 8)) * 8                  # geriye doğru sönen süreklilik
+        elif f > fb:
+            k = (fb - fa) + (1 - math.exp(-(f - fb) / 5)) * 5
+        else:
+            k = f - fa
+        r = H.rot * R.from_rotvec(dR * k)
+        if cfg["spin"]:
+            r = R.from_euler("z", cfg["spin"] * (f - fa) / FPS) * r   # kendi sağına sürekli dönüş
+        return r
+    root_ref = D.rot
+    root_spring = Spring3((root_ref.inv() * root_target(-12)).as_rotvec(), 6.0, 0.8)
 
-            def deriv(self, fr_):
-                h = 0.01
-                return base_loc.deriv(fr_) + np.array([0, 0, (self._bob(fr_ + h) - self._bob(fr_ - h)) / (2 * h)])
-
-            @staticmethod
-            def _bob(fr_):
-                if not a0 < fr_ < a1:
-                    return 0.0
-                u = (fr_ - a0) / (a1 - a0)
-                env = math.sin(math.pi * u)
-                return 0.16 * env * math.sin(2 * math.pi * (fr_ - a0) / 30)
-
-        loc_t = Floating()
-    rot_t = Track(fr, rots=[k[1].rot for k in keys])
-    bone_t = {b: Track(fr, rots=[k[1].bone(b) for k in keys]) for b in bones}
-    sq_t = Track([s[0] for s in squash], vecs=[[s[1]] for s in squash])
-
-    # kökün düşey hızı (stud/s) ve ondan yaylar (60 fps adımında hesap, ince ayrıntı için 4x)
-    F = np.arange(-6, nframes + 1, 0.25)
-    vz = np.array([loc_t.deriv(f)[2] * FPS for f in F])
-    drag = spring(vz, 0.25 / FPS, freq=5.5, zeta=0.6)            # uzuvlar
-    cape = spring(-vz, 0.25 / FPS, freq=2.4, zeta=0.35)          # pelerin (daha yumuşak)
-
-    def at(series, f, delay):
-        return float(np.interp(f - delay, F, series))
-
-    # yukarı/aşağı yönünü bulmak için pelerin işareti: +X dönüşü kuyruğu geriye (+Y) mi atar?
-    t0 = sk.point(sk.fk({}), "Cape1", 1.0)[1]
-    t1 = sk.point(sk.fk({"Cape1": R.from_euler("x", 30, degrees=True).as_matrix()}), "Cape1", 1.0)[1]
-    cape_sign = 1 if t1 > t0 else -1
+    # kemik yayları, başlangıçta hedefte dinlenir
+    springs = {b: Spring3((D.bone(b).inv() * bone_t[b](-12)).as_rotvec(), *BONE_SPRING[b])
+               for b in BONE_SPRING}
+    drag_s = Spring3(np.zeros(3), 4.0, 0.55)
+    cape_s = Spring3(np.zeros(3), 2.6, 0.4)
+    dt = 1 / FPS
+    down = np.array([0, 0, -1.0])
+    # ısınma: yayları -12. kareden başlat (ilk karede sıçrama olmasın)
+    for f in range(-12, 0):
+        rt = root_target(f)
+        root_spring.step((root_ref.inv() * rt).as_rotvec(), dt)
+        for b, sp in springs.items():
+            sp.step((D.bone(b).inv() * bone_t[b](f)).as_rotvec(), dt)
+        drag_s.step(np.array([traj.vz(f), 0, 0]), dt)
+        cape_s.step(np.array([-traj.vz(f), 0, 0]), dt)
 
     frames = []
     for f in range(nframes + 1):
-        loc = loc_t(f)
-        root = rot_t(f)
-        basis = {b: bone_t[b](f - DELAY.get(b, 0)).as_matrix() for b in bones}
+        loc = traj(f)
+        root = root_ref * R.from_rotvec(root_spring.step((root_ref.inv() * root_target(f)).as_rotvec(), dt))
         W = root.as_matrix()
+
+        # 1) hedef pozu kur (Pomni: yüzer gibi çırpan kollar hedefe eklenir)
+        target = {b: bone_t[b](f).as_matrix() for b in bones}
+        if cfg["swim"]:
+            a, b_ = cfg["swim"]
+            env = float(np.clip((f - a) / 5, 0, 1) * np.clip((b_ - f) / 5, 0, 1))
+            if env > 0:
+                pose = sk.fk(target)
+                side = W @ pose["UpperTorso"][:3, 0]
+                for arm_, ph in (("LeftUpperArm", 0.0), ("RightUpperArm", math.pi)):
+                    ang = 28 * env * math.sin(2 * math.pi * 3.0 * f / FPS + ph)
+                    P = W @ pose[arm_][:3, :3] @ np.linalg.inv(target[arm_])
+                    target[arm_] = np.linalg.inv(P) @ world_rot_about(side, ang) @ P @ target[arm_]
+
+        # 2) kemikler hedefe yayla gider (kütle + momentum: hızlanır, aşar, oturur)
+        basis = dict(target)
+        for b, sp in springs.items():
+            x = sp.step((D.bone(b).inv() * R.from_matrix(target[b])).as_rotvec(), dt)
+            basis[b] = (D.bone(b) * R.from_rotvec(x)).as_matrix()
         pose = sk.fk(basis)
 
         def rotate_world(bone, Rw):
-            # kemiği dünya uzayında Rw kadar döndür (kendi ekleminden)
             P = W @ pose[bone][:3, :3] @ np.linalg.inv(basis[bone])
             basis[bone] = np.linalg.inv(P) @ Rw @ P @ basis[bone]
 
-        down = np.array([0, 0, -1.0])
-        # 1) sürükleme: + değer uzvu yerçekimi yönüne (aşağı), - değer yukarı döndürür
-        for limb, lower, dl in (("LeftUpperArm", "LeftLowerArm", 1.0), ("RightUpperArm", "RightLowerArm", 1.3),
-                                ("LeftUpperLeg", "LeftLowerLeg", 1.6), ("RightUpperLeg", "RightLowerLeg", 1.9)):
-            s = at(drag, f, dl)
-            ang = 24 * math.tanh(s / 30)
-            for bone, k in ((limb, 1.0), (lower, 0.45)):
+        # 3) hava sürüklemesi: yükselirken uzuvlar aşağıda kalır, düşerken yukarı kalkar
+        s_ = drag_s.step(np.array([traj.vz(f), 0, 0]), dt)[0]
+        for limb, lower, k in (("LeftUpperArm", "LeftLowerArm", 1.0), ("RightUpperArm", "RightLowerArm", 0.9),
+                               ("LeftUpperLeg", "LeftLowerLeg", 0.8), ("RightUpperLeg", "RightLowerLeg", 0.75)):
+            ang = 32 * math.tanh(s_ / 25) * k
+            for bone, kk in ((limb, 1.0), (lower, 0.5)):
                 pose = sk.fk(basis)
-                d = W @ pose[bone][:3, 1]                          # kemik yönü (dünyada)
-                if bone == lower:
-                    ang_b = 24 * math.tanh(at(drag, f, dl + 2.0) / 30) * k
-                else:
-                    ang_b = ang * k
-                axis = np.cross(d, down)                           # d'yi aşağıya çeviren eksen
-                rotate_world(bone, world_rot_about(axis, ang_b))
-        # 2) Pomni: yüzer gibi çırpınan kollar (sırayla, gövdenin yan ekseni çevresinde)
-        if "swim" in extra:
-            a, b = extra["swim"]
-            env = np.clip((f - a) / 4, 0, 1) * np.clip((b - f) / 4, 0, 1)
-            if env > 0:
-                pose = sk.fk(basis)
-                side = W @ pose["UpperTorso"][:3, 0]
-                for arm, lower, ph in (("LeftUpperArm", "LeftLowerArm", 0.0), ("RightUpperArm", "RightLowerArm", math.pi)):
-                    w = 2 * math.pi * 3.0 / FPS
-                    rotate_world(arm, world_rot_about(side, 24 * env * math.sin(w * f + ph)))
-                    pose = sk.fk(basis)
-                    rotate_world(lower, world_rot_about(side, 14 * env * math.sin(w * (f - 2.5) + ph)))
-        # 3) pelerin: dünyada yerçekimiyle sarkar; hız yayıyla gecikmeli savrulur
-        #    (yükselirken aşağı çekilir, düşerken havalanır). Zincir halkaları sırayla gecikir.
+                d = W @ pose[bone][:3, 1]
+                rotate_world(bone, world_rot_about(np.cross(d, down), ang * kk))
+
+        # 4) pelerin: sırta yakın, gövde boyunca; düşerken havalanır (zincir gecikmeli)
+        c_ = cape_s.step(np.array([-traj.vz(f), 0, 0]), dt)[0]
         pose = sk.fk(basis)
         tr = pose["UpperTorso"][:3, :3] @ np.linalg.inv(sk.rest["UpperTorso"][:3, :3])
         back = W @ tr @ np.array([0, 1.0, 0])
         feet = W @ tr @ np.array([0, 0, -1.0])
-        for i, dl in ((1, 2.0), (2, 3.0), (3, 4.0)):
-            lift = float(np.clip(math.tanh(at(cape, f, dl) / 30), -1, 1))       # + düşerken
-            # sırta yakın, gövde boyunca ayaklara doğru; hafif yerçekimi, düşerken geriye havalanır
+        for i in (1, 2, 3):
+            lift = float(np.clip(math.tanh(c_ / 25), -1, 1)) * (0.8 + 0.2 * i)
             want = feet + back * (0.2 + 0.9 * max(lift, 0)) + down * (0.3 + 0.4 * max(-lift, 0))
             pose = sk.fk(basis)
             d = W @ pose[f"Cape{i}"][:3, 1]
             want = want / (np.linalg.norm(want) + 1e-9)
             full = math.degrees(math.acos(float(np.clip(np.dot(d, want), -1, 1))))
             rotate_world(f"Cape{i}", world_rot_about(np.cross(d, want), 0.75 * full))
-        # 4) hold sırasında kafada küçük nefes / bakış hareketi (2-3°)
-        nod = R.from_euler("xyz", [2.0 * math.sin(f * 0.21), 2.5 * math.sin(f * 0.13 + 1), 0], degrees=True)
-        basis["Head"] = basis["Head"] @ nod.as_matrix()
-        sq = float(np.clip(sq_t(f)[0], 0.88, 1.12))
+
+        # 5) squash & stretch: hıza göre dikey uzama, tepede normal (hacim korunur)
+        sq = 1 + 0.1 * math.tanh(abs(traj.vz(f)) / 35)
         frames.append((loc, root, basis, sq))
-    return frames, hit_f
+    return frames, fa
 
 
-def camera_track(char, cam, nframes, hit_f):
+def camera_track(char, cam, nframes, hit_f, frames=None):
     base = anim.CAMERAS[char]
-    loc0, tgt = Vector(base["loc"]), Vector(base["target"])
+    loc0, tgt0 = Vector(base["loc"]), Vector(base["target"])
     out = []
+    # kamera karakteri hafif gecikmeyle takip eder (tilt): kökün yüksekliğinin %25'i, yaylı
+    follow = Spring3(np.zeros(3), 2.0, 0.9)
+    zref = frames[hit_f][0][2] if frames else 0.0
+    for _ in range(12):
+        follow.step(np.array([0, 0, 0.25 * ((frames[0][0][2] if frames else 0) - zref)]), 1 / FPS)
     for f in range(nframes + 1):
+        dz = follow.step(np.array([0, 0, 0.25 * ((frames[f][0][2] if frames else 0) - zref)]), 1 / FPS)[2]
+        tgt = tgt0 + Vector((0, 0, max(dz, -1.2)))
         u = f / nframes
         push = 0.06 * (3 * u * u - 2 * u ** 3)                     # yavaş yaklaşma (~%6)
         loc = loc0 + (tgt - loc0) * push
@@ -311,7 +352,7 @@ def camera_track(char, cam, nframes, hit_f):
                 0.25 * math.sin(2 * math.pi * 1.1 * t + 1.7),
                 0.3 * math.sin(2 * math.pi * 0.9 * t + 2.2) + 0.1 * math.sin(2 * math.pi * 2.3 * t)]
         k = f - hit_f
-        shake = 1.1 * math.exp(-max(k, 0) / 1.6) * math.sin(k * 2.4) if 0 <= k <= 4 else 0.0
+        shake = 0.6 * math.exp(-max(k, 0) / 1.6) * math.sin(k * 2.4) if 0 <= k <= 4 else 0.0
         e = Euler((rot.x + math.radians(hand[0] + shake), rot.y + math.radians(hand[1]),
                    rot.z + math.radians(hand[2] - 0.6 * shake)), "XYZ")
         out.append((loc, e))
@@ -380,7 +421,7 @@ def main():
     ch, cam = anim.setup_scene(args.char)
     configure(args.preview)
     frames, hit_f = bake(args.char, ch, cam, n)
-    cams = camera_track(args.char, cam, n, hit_f)
+    cams = camera_track(args.char, cam, n, hit_f, frames)
     apply(ch, cam, frames, cams)
     sc = bpy.context.scene
     sc.frame_end = n
