@@ -253,7 +253,7 @@ class GlitchScene:
     def _camera(self, t, t0, t1):
         """Çok hafif yaklaşan kamera; 1. karakter havada daha yüksekte durduğu için kadraj yukarıda."""
         u = span(t, t0, t1)
-        ty = 3.9 if t0 == T_CHAR1[0] else 2.6
+        ty = 3.6 if t0 == T_CHAR1[0] else 2.6
         # referanstaki gibi hafif yukarıdan bakar: öne eğilen gövde kameraya uzanıyormuş gibi görünür
         return look_at((0.15 * u, ty + 3.4, -14.5 + 0.4 * u), (0.15 * u, ty, 0))
 
@@ -276,8 +276,9 @@ class GlitchScene:
         c.save()
         c.scale(1 / self.k, 1 / self.k)                        # GL görüntüsü çıktı çözünürlüğünde
         # Spider-Verse tarzı kademeli izler: geçmiş anlardaki silüetler, renkli ve silik
-        for step, alpha in ((3, 0.16), (2, 0.26), (1, 0.38)):
-            tt = t - step * 0.05
+        # (hareket artık çok hızlı; izler kısa ve silik tutulur ki poz okunur kalsın)
+        for step, alpha in ((2, 0.13), (1, 0.22)):
+            tt = t - step * 0.025
             if tt < t0:
                 continue
             ghost, gx, gy = self._char_image(character, state_fn(tt), self._camera(tt, t0, t1))
