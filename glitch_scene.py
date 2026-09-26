@@ -56,6 +56,7 @@ T_GLITCH = (3.05, 3.45)
 T_CHAR1 = (3.45, 4.28)
 T_CHAR2 = (4.28, 5.28)
 T_SWEEP = (5.28, 5.68)
+SWAP = 0.26                  # 1. -> 2. karakter sahnesi arasındaki çapraz panel geçişi (s)
 T_LOGO = 5.68
 T_OUT = (9.55, 9.95)
 
@@ -500,6 +501,19 @@ class GlitchScene:
 
     # ------------------------------------------------------------ çizim
 
+    def _char_scene(self, c, t, n):
+        """Bir karakter sahnesinin tamamı: zemin, arka şekiller, karakter, ön şekiller."""
+        accent, t0 = (GREY, T_CHAR1[0]) if n == 1 else (GOLD, T_CHAR2[0])
+        self._stage(c, t, accent, BLACK, t0)
+        self._draw_shapes(c, t, accent, BLACK, t0, front=False)
+        if n in self.seq:
+            self._draw_seq(c, t, n)
+        elif n == 1:
+            self._draw_character(c, t, self.androe, char1_state, *T_CHAR1, BLACK, GREY, GREY)
+        else:
+            self._draw_character(c, t, self.official, char2_state, *T_CHAR2, BLACK, GOLD, GOLD_LIGHT)
+        self._draw_shapes(c, t, accent, BLACK, t0, front=True)
+
     def draw(self, c, t):
         c.save()
         c.scale(self.k, self.k)
@@ -507,22 +521,25 @@ class GlitchScene:
             self._draw_letters(c, t)
         elif t < T_CHAR1[0]:
             self._draw_letters(c, T_GLITCH[0] - 1e-3)       # glitch son harf üzerinde uygulanır
+        elif abs(t - T_CHAR2[0]) < SWAP / 2:
+            self._char_scene(c, t, 1)                      # griden altına: çapraz panel süpürmesi
+            u = ease_in_out(span(t, T_CHAR2[0] - SWAP / 2, T_CHAR2[0] + SWAP / 2))
+            x = -500 + (W + 1000) * u                      # süpüren kenar (alt soldan üst sağa eğik)
+            edge = lambda dx: poly([(-600, -100), (x + dx + 300, -100), (x + dx - 300, H + 100), (-600, H + 100)])
+            c.save()
+            c.clipPath(edge(0), doAntiAlias=True)
+            self._char_scene(c, t, 2)
+            c.restore()
+            for dx, rgb in ((130, BLACK), (55, GOLD)):    # kenarda siyah, üstünde altın şerit
+                c.save()
+                c.clipPath(edge(dx), doAntiAlias=True)
+                c.clipPath(edge(0), skia.ClipOp.kDifference, doAntiAlias=True)
+                c.drawPaint(skia.Paint(Color4f=col(rgb)))
+                c.restore()
         elif t < T_CHAR1[1]:
-            self._stage(c, t, GREY, BLACK, T_CHAR1[0])
-            self._draw_shapes(c, t, GREY, BLACK, T_CHAR1[0], front=False)
-            if 1 in self.seq:
-                self._draw_seq(c, t, 1)
-            else:
-                self._draw_character(c, t, self.androe, char1_state, *T_CHAR1, BLACK, GREY, GREY)
-            self._draw_shapes(c, t, GREY, BLACK, T_CHAR1[0], front=True)
+            self._char_scene(c, t, 1)
         elif t < T_CHAR2[1]:
-            self._stage(c, t, GOLD, BLACK, T_CHAR2[0])
-            self._draw_shapes(c, t, GOLD, BLACK, T_CHAR2[0], front=False)
-            if 2 in self.seq:
-                self._draw_seq(c, t, 2)
-            else:
-                self._draw_character(c, t, self.official, char2_state, *T_CHAR2, BLACK, GOLD, GOLD_LIGHT)
-            self._draw_shapes(c, t, GOLD, BLACK, T_CHAR2[0], front=True)
+            self._char_scene(c, t, 2)
         elif t < T_SWEEP[1]:
             self._draw_sweep(c, t)
         else:
@@ -621,6 +638,8 @@ class GlitchScene:
         motion blur ile render edildiği için karakter sahnelerinde az; hızlı geçişlerde çok."""
         if T_GLITCH[0] <= t < T_CHAR1[0] or T_SWEEP[0] <= t < T_SWEEP[1] + 0.05:
             return 6
+        if abs(t - T_CHAR2[0]) < SWAP / 2 + 0.02:
+            return 10                                      # hızlı panel süpürmesi: düzgün bulanıklık
         if T_CHAR1[0] <= t < T_SWEEP[0]:
             return 3 if self.seq else 5
         if t < T_GLITCH[0]:

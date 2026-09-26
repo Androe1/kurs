@@ -122,7 +122,8 @@ class Track:
 # Karakter başına: anahtar pozların kareleri ve fizik ayarları
 CHOREO = {
     1: {"hit": ("c1_hit", 10), "hold": ("c1_hold", 25), "launch_blend": 0.4, "swim": (8, 38),
-        "spin": 0.0, "apex": 19},
+        "spin": 0.0, "apex": 19,
+        "offset": (0.0, 2.6, 0.15), "vy_scale": 0.35},   # kameradan geride; kameraya doğru kayma azaltıldı
     2: {"hit": ("c2_hit", 16), "hold": ("c2_hold", 33), "launch_blend": 0.5, "swim": None,
         "spin": -1.2, "apex": 24},        # rad/s: kendi sağına (üstten bakınca saat yönünde) dönmeye devam eder
 }
@@ -231,6 +232,9 @@ def bake(char, ch, cam, nframes):
     D, fb = Pose.from_key(cfg["hold"][0]), cfg["hold"][1]
     Z = rest(bones)
     traj = Ballistic(H, D, fa, fb, cfg.get("apex"))
+    traj.p = traj.p + np.asarray(cfg.get("offset", (0, 0, 0)))[:2]
+    traj.v = traj.v * np.array([1.0, cfg.get("vy_scale", 1.0)])
+    traj.zs = traj.zs + cfg.get("offset", (0, 0, 0))[2]
 
     # hedef pozlar: fırlarken toplu, vuruş, hold; sonrası hold (düşüşte kollar/bacaklar fizikle kalkar)
     launch = H.blend(Z, cfg["launch_blend"], bones)
