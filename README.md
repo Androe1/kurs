@@ -92,22 +92,36 @@ yazar; rengi her pikselde altındaki zeminin tersidir.
 |--------------|------------------------------------------------------------------------------------------|------------------------------------------------------|
 | 0.35 - 3.05  | A N D R O E harfleri eğik panellerle, dönerek gelir (beyaz / siyah / gri)                  | her harfte tok vuruş + yükselen dijital nota        |
 | 3.05 - 3.45  | Glitch geçişi: şeritler kayar, beyaza patlar                                             | kırpık dijital cızırtı, beyaz patlama               |
-| 3.45 - 4.28  | androe (siyah-beyaz-gri) Pomni gibi fırlar, kolu kameraya uzanır, havada çömelir, kolunu kurup kamçılar, kameraya yaklaşarak düşer | whoosh'lar, swish'ler, şaklama, alçalan düşüş sesi |
-| 4.28 - 5.28  | androeofficial (siyah-beyaz-altın) Caine gibi sırtı dönük yükselir, yay gibi kurulup patlar, çapraz pozda asılı kalır, düşer | gerilen ton, derin vuruş + altın akor, ışıltı |
+| 3.58 - 4.28  | androe (siyah-beyaz-gri) Pomni gibi sağ alttan trambolinden fırlamış gibi yükselir, vuruş pozuna aşıp oturur, gövdesi yatay havada süzülürken kollarını yüzer gibi çırpar, toplanıp kameraya doğru düşer | whoosh'lar, swish'ler, düşüş sesi |
+| 4.28 - 5.10  | androeofficial (siyah-beyaz-altın) Caine gibi şeridin arkasından kendi sağına dönerek yükselir, çapraz vuruş pozuna aşıp oturur, geriye yaslı süzülür, dönmeye devam ederek düşer | gerilen ton, derin vuruş + altın akor, ışıltı |
 | 5.28 - 5.68  | Altın / siyah / beyaz paneller ekranı süpürür                                            | soldan sağa hava sesleri                            |
 | 5.68 - 10.0  | Siyahta beyaz "ANDROE STUDIO" glitch ile kurulur, yavaşça yaklaşır, iki kez ışık geçer   | bas vuruşu, dijital tıklar, sıcak akor, çın sesleri |
 
 ```bash
+pip install bpy==4.2.0 scipy            # Blender Python modülü (karakterler için)
+python blender/fit_keyposes.py          # anahtar pozları çöz (keyposes.json)
+python blender/animate.py --char 1      # karakter dizilerini render et (renders/char1, char2)
+python blender/animate.py --char 2
+python blender/alpha_pass.py renders/char1 renders/char2
 python glitch_intro.py                  # output/androe_glitch_intro.mp4
 python glitch_intro.py --still 4.6      # tek kareyi PNG kaydet
 ```
 
 - `glitch_intro.py` - videoyu üretir
 - `glitch_scene.py` - sahne: harfler, glitch, karakter sahneleri, panel süpürmesi, logo, ters renkli yazı
-- `choreo.py` - iki karakterin koreografisi (referanstan kare kare zamanlanmış anahtar pozlar,
-  her geçişe ayrı hız eğrisi, anticipation, lead & follow, overshoot & settle, ivmeye tepki veren kollar)
-- `rig.py` - Roblox R6 .obj yükleyici ve OpenGL (moderngl, EGL) render; eklem döndürme,
-  eklem konum kaydırma (Motor6D Transform gibi) ve squash & stretch
+- `blender/` - karakter katmanları Blender'da (bpy, headless) üretilir:
+  - `r15_rig.py` - R15 .obj'yi parçalarından tanır, Motor6D düzeninde 19 kemiklik iskelet kurar
+    (HumanoidRootPart, LowerTorso, UpperTorso, Head, kol/bacak zincirleri, 3 kemiklik pelerin);
+    başlık/taç Head'e, pelerin UpperTorso'daki zincire bağlanır; normaller dışa düzeltilir,
+    yinelenen yüzler temizlenir, malzemeler iki yüzlüdür
+  - `fit_keyposes.py` + `posefit.py` - vuruş ve hold pozları referans karelerdeki eklem
+    noktalarından en küçük karelerle çözülür (eklem sınırlı, kameradan bakınca noktalara oturur)
+  - `animate.py` - trambolin fiziği: kök yörüngesi, poz eğrileri (PCHIP, lead & follow),
+    hıza tepki veren kol/bacak sürüklemesi, yerçekimli pelerin, Pomni'nin çırpınan kolları,
+    Caine'in dönüşü, hacmi koruyan squash & stretch, 22 mm kamera (yaklaşma, el kamerası,
+    vuruş sarsıntısı); EEVEE ile gerçek motion blur'lu şeffaf PNG dizisi + meta.json
+  - `alpha_pass.py` - ayrı silüet (alpha) katmanı
+- `rig.py`, `choreo.py` - önceki R6 sürümü (Blender dizileri yoksa sahne bunlarla çizer)
 - `glitch_sound.py` - ses tasarımı (numpy ile sentez; hazır ses kullanılmaz)
 - `characters/` - Roblox Studio'dan dışa aktarılan R6 karakterler (androe, androeofficial)
 - `output/taslak/` - onay için storyboard, hareket önizlemesi ve referansla senkron karşılaştırma

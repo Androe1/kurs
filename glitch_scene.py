@@ -23,6 +23,7 @@ bulanıklığı hem de Spider-Verse tarzı kademeli izler (trail) vardır.
 """
 import json
 import math
+import os
 from pathlib import Path
 
 import numpy as np
@@ -67,8 +68,9 @@ LETTER_STYLE = [
 CREDIT = "Inspired by Glitch Productions"
 
 # Blender'da render edilen karakter katmanları (blender/anim.py): kare numarası pencere başına göre
-SEQ = {1: {"dir": ROOT / "renders" / "char1", "start": 215, "frames": 42, "contour": (0.604, 0.604, 0.604)},
-       2: {"dir": ROOT / "renders" / "char2", "start": 257, "frames": 49, "contour": GOLD}}
+_SEQ_ROOT = ROOT / os.environ.get("GLITCH_SEQ", "renders")        # önizleme için: GLITCH_SEQ=renders_preview
+SEQ = {1: {"dir": _SEQ_ROOT / "char1", "start": 215, "frames": 42, "contour": (0.604, 0.604, 0.604)},
+       2: {"dir": _SEQ_ROOT / "char2", "start": 257, "frames": 49, "contour": GOLD}}
 CONTOUR_GROW = 12            # 1080p'de kontur genişliği (px)
 CONTOUR_SHIFT = (-3.5, 3.5)  # sol-aşağı kaydırma (px)
 RGB_SPLIT_SPEED = 0.012      # ekran genişliği / kare; bunun üstünde 2-3 px RGB ayrışması
@@ -615,11 +617,15 @@ class GlitchScene:
         }
 
     def samples(self, t):
-        if T_CHAR1[0] <= t < T_SWEEP[1]:
-            return 5
+        """Alt-kare örnek sayısı (hareket bulanıklığı). Karakterler Blender'da zaten gerçek
+        motion blur ile render edildiği için karakter sahnelerinde az; hızlı geçişlerde çok."""
+        if T_GLITCH[0] <= t < T_CHAR1[0] or T_SWEEP[0] <= t < T_SWEEP[1] + 0.05:
+            return 6
+        if T_CHAR1[0] <= t < T_SWEEP[0]:
+            return 3 if self.seq else 5
         if t < T_GLITCH[0]:
             return 4
-        return 2
+        return 3
 
     def render(self, t):
         n = self.samples(t)
