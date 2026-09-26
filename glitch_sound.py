@@ -1,20 +1,19 @@
-"""Androe Studio karakterli intro - ses tasarımı.
+"""Androe Studio karakterli intro - ses tasarımı (enerjik, ritmik).
 
 Tamamen numpy ile sentezlenir; hazır ses ya da örnek kullanılmaz ve GLITCH
-açılışındaki müziği / sesleri taklit etmez. Karakteri elektronik ve dijitaldir:
+açılışının müziğini taklit etmez. Her şey harflerin vuruşuna kilitli bir tempo
+ızgarasında çalar (BEAT = 0.45 s = 133 BPM, La minör):
 
-  harfler          -> her harfte tok vuruş + parlak dijital "blip" (La minör pentatonik
-                      yükselen dizi), panel süpürmesine kısa hava sesi
-  son harf büyür   -> yükselen gerilim
-  glitch geçişi    -> kırpılmış (bitcrush) dijital cızırtı, rastgele cıvıltılar, beyaz patlama
-  1. karakter      -> fırlarken yükselen whoosh, kol hareketlerine kısa swish'ler,
-                      çömelmede yumuşak tok ses, kamçıda şaklama, düşüşte alçalan whoosh
-  sahne geçişi     -> kısa dijital "zap"
-  2. karakter      -> dönerek yükselen stereo whoosh, kurulurken gerilen ton,
-                      patlamada derin vuruş + altın akor vuruşu + ışıltı, düşüşte whoosh
-  panel süpürmesi  -> soldan sağa geçen hava sesleri, logoya çıkan yükseliş
-  logo             -> her harfte dijital tık, bas vuruşu, sıcak akor zemini,
-                      ışık geçişlerinde çın sesi, ara titremelerde küçük glitch'ler
+  harfler (0.35-3.05)   dört vuruşlu davul (kick), 2. ve 4. vuruşta clap, sekizlik hi-hat,
+                        offbeat bas, her harfte yükselen dijital nota + panel whoosh'u;
+                        son bar trampet rulosu ve yükseliş
+  glitch (3.05-3.45)    son 16'lığın kekeleyerek tekrarı (stutter), bitcrush, beyaza patlama
+  karakterler           tam groove: 16'lık bas, açık hi-hat, arpej, kick'e göre "pompalayan"
+                        (sidechain) akor; karakter sesleri animasyon karelerine bağlı: fırlama
+                        whoosh'u, vuruşta patlama + akor vuruşu, çırpınmalarda swish, düşüş
+  panel süpürmesi       trampet rulosu + yükseliş, logodan hemen önce kısa sessizlik
+  logo                  büyük vuruş + akor, yarım tempo groove, sıcak akor zemini, çın sesleri;
+                        sonda yankı kuyruğuyla söner
 """
 import numpy as np
 
@@ -234,83 +233,228 @@ def ting(mx, t0, gain=0.035, pan=0.2):
     mx.add(s, t0, gain=gain, pan=pan, reverb=0.5)
 
 
+# ---------------------------------------------------------------- ritim bölümü
+
+CHORDS = {  # La minör: kök (bas) ve akor notaları
+    "Am": (55.0, [220.0, 261.63, 329.63, 440.0]),
+    "F": (43.65, [174.61, 220.0, 261.63, 349.23]),
+    "C": (65.41, [196.0, 261.63, 329.63, 392.0]),
+    "G": (49.0, [196.0, 246.94, 293.66, 392.0]),
+}
+PROG = ["Am", "F", "C", "G"]
+
+
+def hat(mx, t0, rng, open_=False, gain=0.06, pan=0.25):
+    t = span(0.25 if open_ else 0.06)
+    n = rng.standard_normal(len(t))
+    env = np.exp(-t / (0.09 if open_ else 0.014))
+    mx.add(peak(band(n, lo=7500)) * env, t0, gain=gain, pan=pan, reverb=0.05)
+
+
+def clap(mx, t0, rng, gain=0.28):
+    """Üç hızlı patlamadan oluşan el çırpma + gövde."""
+    t = span(0.3)
+    n = rng.standard_normal(len(t))
+    env = sum(np.exp(-np.clip(t - d, 0, None) / 0.006) * (t >= d) for d in (0.0, 0.011, 0.022))
+    env = env + 0.8 * np.exp(-np.clip(t - 0.03, 0, None) / 0.07) * (t >= 0.03)
+    mx.add(peak(band(n, lo=900, hi=6000)) * env, t0, gain=gain, pan=0.0, reverb=0.25)
+
+
+def snare(mx, t0, rng, gain=0.2):
+    t = span(0.22)
+    n = rng.standard_normal(len(t))
+    body = np.sin(glide(190 * (1 + 0.4 * np.exp(-t / 0.01)))) * np.exp(-t / 0.05)
+    mx.add(0.6 * body + peak(band(n, lo=1500, hi=9000)) * np.exp(-t / 0.07), t0, gain=gain, reverb=0.2)
+
+
+def bass_note(mx, t0, f, dur, gain=0.22):
+    """Kare/testere karışımı bas; filtre her notada açılıp kapanır (plak gibi 'pluck')."""
+    t = span(dur)
+    out = np.zeros_like(t)
+    cutoff = 250 + 1600 * np.exp(-t / 0.05)
+    for h in range(1, 24):
+        amp = (1 / h) * (1.0 if h % 2 else 0.45)
+        out += amp * np.sin(TAU * f * h * t) / np.sqrt(1 + (f * h / cutoff) ** 4)
+    env = (1 - np.exp(-t / 0.003)) * np.clip((dur - t) / 0.01, 0, 1) * np.exp(-t / (dur * 1.2))
+    mx.add(np.tanh(1.5 * peak(out)) * env, t0, gain=gain, reverb=0.02)
+
+
+def pluck(mx, t0, f, gain=0.05, pan=0.0):
+    """Arpej için kısa, parlak testere 'pluck'."""
+    t = span(0.22)
+    cutoff = 800 + 5000 * np.exp(-t / 0.03)
+    out = sum((1 / h) * np.sin(TAU * f * h * t) / np.sqrt(1 + (f * h / cutoff) ** 4) for h in range(1, 14))
+    mx.add(peak(out) * (1 - np.exp(-t / 0.002)) * np.exp(-t / 0.08), t0, gain=gain, pan=pan, reverb=0.35)
+
+
+def chord_bed(mx, t0, dur, notes, rng, gain=0.07):
+    """Sürekli akor (sidechain ile kick'e göre pompalanacak)."""
+    t = span(dur)
+    out = np.zeros((len(t), 2))
+    for f in notes:
+        for cents, pan in ((-10, -0.6), (10, 0.6)):
+            fd = f * 2 ** (cents / 1200)
+            saw = sum(np.sin(TAU * fd * h * t + rng.uniform(0, TAU)) / h * np.exp(-h * fd / 2500) for h in range(1, 10))
+            p = (pan + 1) * np.pi / 4
+            out[:, 0] += saw * np.cos(p)
+            out[:, 1] += saw * np.sin(p)
+    env = np.clip(t / 0.02, 0, 1) * np.clip((dur - t) / 0.03, 0, 1)
+    mx.add(out / np.abs(out).max() * env[:, None], t0, gain=gain, reverb=0.3)
+
+
+def sidechain(x, kicks, depth=0.75, release=0.16):
+    """Kick anlarında sesi kısıp geri açar (pompalama)."""
+    t = np.arange(len(x)) / SR
+    g = np.ones(len(x))
+    for k in kicks:
+        m = (t >= k) & (t < k + 4 * release)
+        g[m] = np.minimum(g[m], 1 - depth * np.exp(-(t[m] - k) / release))
+    return x * g[:, None]
+
+
 def synthesize(ev, seed=21):
     """Sahne olaylarından (GlitchScene.events) stereo ses üretir: (örnek, 2) float32."""
     rng = np.random.default_rng(seed)
-    mx = Mixer(ev["duration"])
+    dur = ev["duration"]
+    drums, music, sfx = Mixer(dur), Mixer(dur), Mixer(dur)
+    B, T0 = ev["beat"], ev["t0"]
+    beat = lambda n: T0 + n * B
+    g0, g1 = ev["glitch"]
+    logo, (s0, s1) = ev["logo"], ev["sweep"]
+    n_glitch = round((g0 - T0) / B)            # 6: glitch vuruşu
+    n_logo = (logo - T0) / B
+    kicks = []
 
-    # --- harfler: her vuruşta panel süpürmesi + tok vuruş + yükselen blip
+    # ---------- davul ızgarası
+    n = 0
+    while beat(n) < ev["out"][0]:
+        t = beat(n)
+        in_glitch = g0 - 0.01 <= t < g1
+        pre_logo = s1 - 0.06 <= t < logo
+        if not in_glitch and not pre_logo:
+            half_time = t >= logo + 0.3
+            if not half_time or n % 2 == 0:
+                kick(drums, t, gain=0.55 if t < logo else 0.45)
+                kicks.append(t)
+            if n % 2 == 1 and t < logo + 2 * B:
+                clap(drums, t, rng, gain=0.22)
+            elif n % 4 == 2 and half_time:
+                clap(drums, t, rng, gain=0.16)
+            # hi-hat: harflerde sekizlik, karakterlerde 16'lık + açık offbeat
+            chars = g1 <= t < s1
+            for k in (range(4) if chars else range(2)):
+                tt = t + k * B / (4 if chars else 2)
+                if half_time and k % 2:
+                    continue
+                hat(drums, tt, rng, open_=(chars and k == 2), gain=0.05 if k else 0.035,
+                    pan=0.3 if k % 2 else -0.2)
+        n += 1
+
+    # son harf barında ve süpürmede trampet rulosu (hızlanan)
+    for a, b in ((beat(n_glitch - 1), g0), (s0, s1 - 0.06)):
+        t, step = a, B / 2
+        while t < b - 0.02:
+            snare(drums, t, rng, gain=0.07 + 0.12 * (t - a) / (b - a))
+            t += step
+            step = max(step * 0.8, B / 8)
+
+    # ---------- bas, akor, arpej (bar = 4 vuruş)
+    n = 0
+    while beat(n) < ev["out"][0] + 0.2:
+        t = beat(n)
+        if g0 - 0.01 <= t < g1 or s1 - 0.06 <= t < logo:
+            n += 1
+            continue
+        chord = PROG[(n // 4) % 4] if t >= g1 else "Am"
+        root, notes = CHORDS[chord]
+        chars = g1 <= t < s1
+        if t < logo:
+            if chars:                                           # 16'lık sürüş basanı
+                for k, mult in enumerate((1, 1, 2, 1)):
+                    bass_note(music, t + k * B / 4, root * mult, B / 4 * 0.9, gain=0.2)
+            else:                                               # offbeat bas
+                bass_note(music, t + B / 2, root * 2, B / 2 * 0.8, gain=0.2)
+            if n % 4 == 0 and chars:
+                chord_bed(music, t, 4 * B, notes, rng, gain=0.06)
+            if chars:                                           # arpej
+                for k in range(4):
+                    pluck(music, t + k * B / 4, notes[(n * 4 + k) % len(notes)] * 2, gain=0.035,
+                          pan=-0.4 + 0.8 * (k % 2))
+        else:                                                   # logo: yarım tempo, yumuşak
+            if n % 2 == 0:
+                bass_note(music, t, CHORDS["Am"][0], B * 1.6, gain=0.16)
+            pluck(music, t, CHORDS["Am"][1][n % 4] * 4, gain=0.02, pan=0.3 if n % 2 else -0.3)
+        n += 1
+
+    # ---------- harfler: panel whoosh + dijital nota + küçük yankı notası
     for i, t0 in enumerate(ev["letters"]):
         pan = -0.3 if i % 2 else 0.3
-        whoosh(mx, t0 - 0.05, t0 + 0.1, rng, f0=400, f1=2200, pan0=0, pan1=0, gain=0.12)
-        kick(mx, t0, gain=0.5)
-        snap(mx, t0 + 0.005, rng, gain=0.12, pan=pan)
-        blip(mx, t0, LETTER_NOTES[i], gain=0.1, pan=pan)
-        blip(mx, t0 + 0.11, LETTER_NOTES[i] * 2, gain=0.035, pan=-pan, length=0.18)   # küçük yankı notası
-    # hafif ritim zemini: vuruşların arasında kısa hi-hat
-    for t0 in ev["letters"]:
-        for k in (0.5,):
-            tt = span(0.05)
-            mx.add(peak(band(rng.standard_normal(len(tt)), lo=7000)) * np.exp(-tt / 0.012),
-                   t0 + k * 0.45, gain=0.05, pan=0.2, reverb=0.1)
-    riser(mx, ev["zoom"][0], ev["glitch"][1], rng, f0=400, f1=7000, gain=0.2)
+        whoosh(sfx, t0 - 0.07, t0 + 0.08, rng, f0=500, f1=2600, gain=0.14)
+        blip(sfx, t0, LETTER_NOTES[i], gain=0.12, pan=pan)
+        blip(sfx, t0 + B / 2, LETTER_NOTES[i] * 2, gain=0.04, pan=-pan, length=0.15)
+    riser(sfx, ev["zoom"][0], g0, rng, f0=400, f1=7000, gain=0.2)
 
-    # --- glitch geçişi ve beyaza patlama
-    glitch_burst(mx, *ev["glitch"], rng)
-    white_burst(mx, ev["glitch"][1] - 0.02, rng)
+    # ---------- glitch geçişi
+    glitch_burst(sfx, g0, g1, rng, gain=0.22)
+    white_burst(sfx, g1 - 0.02, rng, gain=0.45)
 
-    # --- 1. karakter (sol-orta)
-    p1 = -0.15
-    whoosh(mx, *ev["c1_rise"], rng, f0=350, f1=2800, pan0=p1, pan1=p1, gain=0.3)
-    swish(mx, ev["c1_reach"], rng, dur=0.06, fc=3200, gain=0.12, pan=0.3)
-    swish(mx, ev["c1_swipe"][0], rng, dur=ev["c1_swipe"][1] - ev["c1_swipe"][0], fc=2000, gain=0.2, pan=0.35)
-    thud(mx, ev["c1_tuck"], gain=0.28, pan=p1)
-    swish(mx, ev["c1_windup"][0], rng, dur=ev["c1_windup"][1] - ev["c1_windup"][0], fc=2600, gain=0.14, pan=-0.4)
-    swish(mx, ev["c1_whip"][0], rng, dur=0.05, fc=3500, gain=0.18, pan=-0.2)
-    crack(mx, ev["c1_whip"][0] + 0.045, rng, gain=0.22, pan=0.0)
-    fall_whoosh(mx, *ev["c1_fall"], rng, pan=p1, gain=0.26)
+    # ---------- 1. karakter
+    a, b = ev["c1_rise"]
+    whoosh(sfx, a - 0.03, b, rng, f0=300, f1=3200, pan0=0.4, pan1=0.0, gain=0.34)
+    boom(sfx, ev["c1_hit"], rng, gain=0.35)
+    chord_stab(sfx, ev["c1_hit"], CHORDS["Am"][1], rng, gain=0.13, length=0.6)
+    for k, t in enumerate(ev["c1_flaps"]):
+        swish(sfx, t, rng, dur=0.1, fc=2200 + 300 * k, gain=0.14, pan=-0.3 if k % 2 else 0.3)
+    thud(sfx, ev["c1_antic"], gain=0.2)
+    fall_whoosh(sfx, *ev["c1_fall"], rng, gain=0.26)
+    zap(sfx, ev["cut"], rng, gain=0.16)
 
-    zap(mx, ev["cut"], rng)
+    # ---------- 2. karakter
+    a, b = ev["c2_rise"]
+    whoosh(sfx, a, b, rng, f0=280, f1=2800, pan0=-0.5, pan1=0.5, gain=0.32)
+    tension(sfx, b - 0.12, b - 0.005, gain=0.1)
+    boom(sfx, ev["c2_hit"], rng, gain=0.55)
+    chord_stab(sfx, ev["c2_hit"], GOLD_CHORD, rng, gain=0.18)
+    sparkle(sfx, ev["c2_hit"] + 0.05, rng, count=24, spread=0.45, gain=0.02)
+    thud(sfx, ev["c2_antic"], gain=0.2, pan=0.15)
+    fall_whoosh(sfx, *ev["c2_fall"], rng, pan=0.15, gain=0.26)
 
-    # --- 2. karakter (orta-sağ)
-    p2 = 0.15
-    whoosh(mx, *ev["c2_rise"], rng, f0=300, f1=2400, pan0=-0.5, pan1=0.5, gain=0.3)
-    tension(mx, *ev["c2_coil"], gain=0.1)
-    boom(mx, ev["c2_burst"], rng, gain=0.6)
-    chord_stab(mx, ev["c2_burst"], GOLD_CHORD, rng, gain=0.2)
-    snap(mx, ev["c2_burst"] + 0.004, rng, gain=0.2, pan=0.0)
-    sparkle(mx, ev["c2_burst"] + 0.05, rng, count=26, spread=0.5, gain=0.02)
-    t = span(ev["c2_hold"][1] - ev["c2_hold"][0])      # asılı kalışta hafif ışıltılı hava
-    hold = peak(band(rng.standard_normal(len(t)), lo=5000, hi=11000)) * np.sin(np.pi * t / t[-1]) ** 2
-    mx.add(hold, ev["c2_hold"][0], gain=0.03, pan=p2, reverb=0.4)
-    fall_whoosh(mx, *ev["c2_fall"], rng, pan=p2, gain=0.26)
-
-    # --- panel süpürmesi: soldan sağa hava sesleri ve logoya yükseliş
-    a, b = ev["sweep"]
+    # ---------- süpürme ve logo
     for k in range(4):
-        s0 = a + k * 0.2 * (b - a) / 1.6
-        whoosh(mx, s0, s0 + 0.2, rng, f0=600, f1=2600, pan0=-0.7, pan1=0.7, gain=0.2)
-    riser(mx, a, ev["logo"], rng, f0=500, f1=5000, gain=0.12)
-
-    # --- logo
-    logo = ev["logo"]
-    boom(mx, logo + 0.1, rng, gain=0.5)
+        t = s0 + k * 0.2 * (s1 - s0) / 1.6
+        whoosh(sfx, t, t + 0.2, rng, f0=600, f1=2600, pan0=-0.7, pan1=0.7, gain=0.18)
+    riser(sfx, s0 - 0.2, logo - 0.06, rng, f0=500, f1=6000, gain=0.16)
+    boom(sfx, logo, rng, gain=0.6)
+    chord_stab(sfx, logo, LOGO_CHORD[2:], rng, gain=0.16, length=1.4)
     for k, t0 in enumerate(ev["logo_letters"]):
-        tick(mx, t0, rng, gain=0.07, pan=-0.6 + 1.2 * k / max(len(ev["logo_letters"]) - 1, 1))
-    chord_stab(mx, ev["logo_letters"][-1] + 0.2, LOGO_CHORD[2:], rng, gain=0.12, length=1.2)
-    warm_pad(mx, logo + 0.1, ev["out"][0], ev["out"][1] + 0.05, LOGO_CHORD, rng)
-    bell(mx, ev["logo_letters"][-1] + 0.22, 880.0, gain=0.06, rng=rng)
-    for k, s0 in enumerate(ev["shines"]):
-        ting(mx, s0 + 0.3, gain=0.035 if k == 0 else 0.025, pan=-0.2 + 0.4 * k)
-        sparkle(mx, s0 + 0.2, rng, count=10, spread=0.3, gain=0.012)
-    for s0 in ev["flickers"]:
-        tick(mx, s0, rng, gain=0.035, pan=rng.uniform(-0.5, 0.5))
+        tick(sfx, t0, rng, gain=0.06, pan=-0.6 + 1.2 * k / max(len(ev["logo_letters"]) - 1, 1))
+    warm_pad(music, logo + 0.05, ev["out"][0], ev["out"][1] + 0.05, LOGO_CHORD, rng, gain=0.13)
+    bell(sfx, ev["logo_letters"][-1] + 0.22, 880.0, gain=0.06, rng=rng)
+    for k, t in enumerate(ev["shines"]):
+        ting(sfx, t + 0.3, gain=0.035 if k == 0 else 0.025, pan=-0.2 + 0.4 * k)
+        sparkle(sfx, t + 0.2, rng, count=10, spread=0.3, gain=0.012)
+    for t in ev["flickers"]:
+        tick(sfx, t, rng, gain=0.03, pan=rng.uniform(-0.5, 0.5))
 
-    mix = mx.dry + 0.35 * convolve(mx.send, reverb_ir(rng, length=1.8, rt60=1.2))
+    # ---------- miks: müzik kick'e göre pompalanır; glitch'te son 16'lık kekeler
+    mus = sidechain(music.dry, kicks) + 0.3 * convolve(sidechain(music.send, kicks), reverb_ir(rng, 1.4, 1.0))
+    drm = drums.dry + 0.25 * convolve(drums.send, reverb_ir(rng, 1.0, 0.7))
+    bed = mus + drm
+    i0, i1 = int(g0 * SR), int(g1 * SR)
+    seg = bed[int((g0 - B / 4) * SR):i0].copy()
+    reps = []
+    L = len(seg)
+    while sum(len(r) for r in reps) < i1 - i0:
+        m = max(int(L * (0.5 ** (len(reps) // 3))), 400)         # tekrar boyu giderek kısalır
+        reps.append(seg[:m] * np.linspace(1, 0.6, m)[:, None])
+    stut = np.vstack(reps)[: i1 - i0]
+    bed[i0:i1] = bitcrush(stut.ravel(), 3, 6).reshape(stut.shape) * 0.8
+    fx = sfx.dry + 0.35 * convolve(sfx.send, reverb_ir(rng, length=1.8, rt60=1.2))
+    mix = 0.9 * bed + fx
     t = np.arange(len(mix)) / SR
     out = ev["out"]
     fade = np.clip(t / 0.003, 0, 1)
     fade *= 0.5 + 0.5 * np.cos(np.pi * np.clip((t - out[0]) / (out[1] + 0.04 - out[0]), 0, 1))
     mix *= fade[:, None]
-    mix = np.tanh(1.4 * mix / np.abs(mix).max()) / np.tanh(1.4)
+    mix = np.tanh(1.6 * mix / np.abs(mix).max()) / np.tanh(1.6)
     return (mix * 10 ** (-1 / 20)).astype(np.float32)
