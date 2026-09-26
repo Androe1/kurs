@@ -127,3 +127,55 @@ python glitch_intro.py --still 4.6      # tek kareyi PNG kaydet
 - `output/taslak/` - onay için storyboard, hareket önizlemesi ve referansla senkron karşılaştırma
 
 Linux'ta sunucuda çalıştırmak için `libegl1` gerekir (ekran kartı gerekmez, llvmpipe ile çalışır).
+
+---
+
+# Korku Oyunu Teaser'ı (15 saniye)
+
+Hazır video: [`output/horror_teaser.mp4`](output/horror_teaser.mp4)
+(1920x1080, 60 fps, H.264 + AAC stereo). 3B sahne, çizim / boyama görünümüyle render edilir:
+mürekkep konturları, bantlı boya gölgelendirme, Kuwahara boya filtresi, fırça dokusu.
+Görüntü de ses de kodla üretilir; tek hazır görsel, oyunun göz çizimidir (`assets/seytani_gozler.png`).
+
+| Saniye       | Görüntü                                                                                          | Ses                                                        |
+|--------------|--------------------------------------------------------------------------------------------------|------------------------------------------------------------|
+| 0.0 - 0.7    | Zifiri karanlık                                                                                  | kısık oda uğultusu, derinden bas                           |
+| 0.7          | Tepede spot ışık titreyerek yanar, huzmede toz süzülür                                           | ağır şalter "klank"ı, titremeyle kesilen lamba vızıltısı   |
+| 0.95 - 2.75  | Kan yukarıdan ağır ağır iner, ucunda damla şişer; iki damla karanlığa düşer                      | yapışkan gurultu; damlalar çok aşağıdan yankılanır         |
+| 2.75 - 5.05  | Damla titreyip döner, yüzeyinde sarmal sırtlar belirir; yapraklar sıvıdan çıkar ve üç vuruşta dıştan içe açılarak gül olur | tersten yükselen nefes, ıslak çıtırtılar, fısıltılar; her açılma vuruşu kalp atışı + yaylı darbesi |
+| 5.25         | İplik kopar, üst parça yaylanarak geri çekilir                                                   | çıt + esnek geri sekme                                     |
+| 5.25 - 8.35  | Gül düşen yaprak fiziğiyle sağa sola yatarak süzülür, kamera yayla takip eder; üstünden kan damlar | gülün hızıyla açılan, onunla sağa sola gezen hışırtı, hızlanan kalp |
+| 8.35         | Gül kan birikintisine değer: halka halka dalga, taç sıçraması; iki yaprak kopup savrulur ve sıvıya iner | BRAAM, alt frekans patlaması, sıçrama, halkaların parıltısı |
+| 9.85 - 10.95 | Işık titreyip söner, kamera yukarı, karanlığa bakar                                              | yükselen gerilim, hızlanan kalp, ölü sessizlik             |
+| 11.15 - 11.75 | Karanlıktan kapalı şeytani gözler belirir, bir kez seğirir                                      | derin hırıltı, içe çekilen nefes, ıslak tık                |
+| 11.75 - 12.95 | Kapaklar açılır; göz bebekleri büyükten iğne ucuna büzülür, kamera sarsılır; sonda gözler kısılır | dev vuruş: uyumsuz akor kümesi, metal çığlık, alt patlama |
+| 13.15 - 15.0 | "COMING SOON" ortadan dışa yanarak belirir, titrer, söner                                        | derin vuruş, metalik çınlama, karanlık uğultu              |
+
+```bash
+pip install -r requirements.txt
+python horror_teaser.py                     # output/horror_teaser.mp4 (1080p60, ~30 dk)
+python horror_teaser.py --width 960 --height 540 --fps 30 -o output/taslak/horror_teaser_onizleme.mp4
+python horror_teaser.py --still 8.6         # tek kareyi PNG kaydet
+python horror_teaser.py --storyboard        # anahtar anlardan film şeridi
+```
+
+- `horror_teaser.py` - videoyu üretir (kareleri render eder, sesi sentezler, ffmpeg ile birleştirir)
+- `horror_scene.py` - zaman çizelgesi, fizik, kamera, ışık; sıvı, damlacıklar, dalga kaynakları, gözler, yazı
+  - gülün düşüşü: Andersen–Pesavento–Wang yarı-durağan düz levha modeli (kaldırma / sirkülasyon,
+    yöne bağlı sürükleme, eklenen kütle, dönme sönümü) + çiçeğin ağır tabanından gelen safra torku;
+    sağa sola süzülme kendiliğinden oluşur. Zaman ölçeği g ile ayarlanır (inişin anı sabit kalsın).
+    Sıvıya değince temas kuvveti kademeli devreye girer; yatay hız söner, eğim burulma yayıyla düzelir.
+  - kopan yapraklar: yöne bağlı sürükleme ve yana itişle sallanarak düşer, sıvıda yüzer
+  - hareket `.claude/skills/character-physics/scripts/check_motion.py` ile doğrulandı (hız sıçraması
+    ve ters sarsıntı yok)
+- `horror_rose.py` - prosedürel gül: 26 yaprak, orta çizgi + enine kesit integrali, altın açı dizilimi,
+  tomurcuk (damla) -> açık gül geçişi
+- `horror_eyes.py` - göz çizimi: göz bebekleri silinir (animasyonlu çizilir), kapak sınırları çizimden çıkarılır
+- `horror_gl.py` - moderngl render hattı: gölge haritası, 48 yönden ortam kapanması, zemin yansıması,
+  hacimsel ışık, G-buffer, bloom, ton eşleme
+- `shaders/` - GLSL: gül yaprağı, kan sıvısı (raymarch), dalgalanan kan zemini, ışık huzmesi, toz,
+  çizim görünümü (kontur + Kuwahara), gözler, yazı, son işlem
+- `horror_sound.py` - ses tasarımı (numpy ile sentez)
+- `fonts/Cinzel-*.ttf` - Cinzel yazı tipi (SIL Open Font License, bkz. `fonts/Cinzel-OFL.txt`)
+
+Linux sunucuda `libegl1` gerekir (ekran kartı gerekmez, Mesa llvmpipe ile çalışır).
