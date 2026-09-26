@@ -494,6 +494,33 @@ class GlitchScene:
         out[y0:y1, x0:x1] = (region * (1 - m) + ink * m).astype(np.uint8)
         return out
 
+    def events(self):
+        """Ses tasarımı için olay zamanları (saniye). Karakter anları choreo.py'deki
+        anahtarlarla aynıdır, böylece her ses hareketin kendisine denk gelir."""
+        c1, c2 = T_CHAR1[0], T_CHAR2[0]
+        flickers = [i / 60 for i in range(int((T_LOGO + 0.8) * 60), int(9.4 * 60))
+                    if i % 37 == 0]
+        return {
+            "duration": DURATION,
+            "letters": [T_LETTERS + i * BEAT + 0.04 for i in range(len(LETTERS))],
+            "zoom": (T_LETTERS + (len(LETTERS) - 1) * BEAT + 0.18, T_GLITCH[0]),
+            "glitch": T_GLITCH,
+            # 1. karakter (Pomni gibi): fırlama, uzanma, süpürme, çömelme, kurma, kamçı, düşüş
+            "c1_rise": (c1 + 0.05, c1 + 0.21), "c1_reach": c1 + 0.2, "c1_swipe": (c1 + 0.247, c1 + 0.313),
+            "c1_tuck": c1 + 0.347, "c1_windup": (c1 + 0.38, c1 + 0.44), "c1_whip": (c1 + 0.48, c1 + 0.56),
+            "c1_fall": (c1 + 0.58, c1 + 0.83),
+            "cut": c2,
+            # 2. karakter (Caine gibi): dönerek yükselme, kurulma, patlama, asılı kalış, düşüş
+            "c2_rise": (c2 + 0.03, c2 + 0.2), "c2_coil": (c2 + 0.15, c2 + 0.235), "c2_burst": c2 + 0.25,
+            "c2_hold": (c2 + 0.33, c2 + 0.66), "c2_fall": (c2 + 0.683, c2 + 0.9),
+            "sweep": T_SWEEP,
+            "logo": T_LOGO,
+            "logo_letters": sorted(a for _, a in self.logo),
+            "shines": [T_LOGO + 1.0, T_LOGO + 2.6],
+            "flickers": flickers,
+            "out": T_OUT,
+        }
+
     def samples(self, t):
         if T_CHAR1[0] <= t < T_SWEEP[1]:
             return 5

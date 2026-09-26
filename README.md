@@ -79,3 +79,37 @@ parlama, logonun arkasında nefes alan sarı hale ve üzerinden geçen ışık. 
 etrafına hale ekler; harflerin içi her zaman logodaki renktir (Nex #FFFFFF, Dev #FFCC69).
 
 - `fonts/Inter-Black.ttf` - Inter yazı tipi (SIL Open Font License, bkz. `fonts/Inter-LICENSE.txt`)
+
+---
+
+# Androe Studio - Karakterli Intro (10 saniye, GLITCH Productions'tan ilham)
+
+Hazır video: [`output/androe_glitch_intro.mp4`](output/androe_glitch_intro.mp4)
+(1920x1080, 60 fps, H.264 + AAC stereo). Sağ altta "Inspired by Glitch Productions"
+yazar; rengi her pikselde altındaki zeminin tersidir.
+
+| Saniye       | Görüntü                                                                                  | Ses                                                  |
+|--------------|------------------------------------------------------------------------------------------|------------------------------------------------------|
+| 0.35 - 3.05  | A N D R O E harfleri eğik panellerle, dönerek gelir (beyaz / siyah / gri)                  | her harfte tok vuruş + yükselen dijital nota        |
+| 3.05 - 3.45  | Glitch geçişi: şeritler kayar, beyaza patlar                                             | kırpık dijital cızırtı, beyaz patlama               |
+| 3.45 - 4.28  | androe (siyah-beyaz-gri) Pomni gibi fırlar, kolu kameraya uzanır, havada çömelir, kolunu kurup kamçılar, kameraya yaklaşarak düşer | whoosh'lar, swish'ler, şaklama, alçalan düşüş sesi |
+| 4.28 - 5.28  | androeofficial (siyah-beyaz-altın) Caine gibi sırtı dönük yükselir, yay gibi kurulup patlar, çapraz pozda asılı kalır, düşer | gerilen ton, derin vuruş + altın akor, ışıltı |
+| 5.28 - 5.68  | Altın / siyah / beyaz paneller ekranı süpürür                                            | soldan sağa hava sesleri                            |
+| 5.68 - 10.0  | Siyahta beyaz "ANDROE STUDIO" glitch ile kurulur, yavaşça yaklaşır, iki kez ışık geçer   | bas vuruşu, dijital tıklar, sıcak akor, çın sesleri |
+
+```bash
+python glitch_intro.py                  # output/androe_glitch_intro.mp4
+python glitch_intro.py --still 4.6      # tek kareyi PNG kaydet
+```
+
+- `glitch_intro.py` - videoyu üretir
+- `glitch_scene.py` - sahne: harfler, glitch, karakter sahneleri, panel süpürmesi, logo, ters renkli yazı
+- `choreo.py` - iki karakterin koreografisi (referanstan kare kare zamanlanmış anahtar pozlar,
+  her geçişe ayrı hız eğrisi, anticipation, lead & follow, overshoot & settle, ivmeye tepki veren kollar)
+- `rig.py` - Roblox R6 .obj yükleyici ve OpenGL (moderngl, EGL) render; eklem döndürme,
+  eklem konum kaydırma (Motor6D Transform gibi) ve squash & stretch
+- `glitch_sound.py` - ses tasarımı (numpy ile sentez; hazır ses kullanılmaz)
+- `characters/` - Roblox Studio'dan dışa aktarılan R6 karakterler (androe, androeofficial)
+- `output/taslak/` - onay için storyboard, hareket önizlemesi ve referansla senkron karşılaştırma
+
+Linux'ta sunucuda çalıştırmak için `libegl1` gerekir (ekran kartı gerekmez, llvmpipe ile çalışır).
