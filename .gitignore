@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 renders/
 renders_preview/
+
+# Kullanıcının verdiği telifli girdiler (şarkı ve sözler) repoya eklenmez
+input/
+output/queen_*.mp4

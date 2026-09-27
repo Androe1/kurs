@@ -1,0 +1,10 @@
+QUEEN lyric video'da kullanılan yazı tipleri (hepsi SIL Open Font License 1.1, bkz. OFL.txt).
+Google Fonts dosyaları npm @fontsource paketlerinden alınıp woff2 -> TTF'ye çevrildi;
+Japonca fontların alt kümeleri tek dosyada birleştirildi.
+
+DelaGothicOne.ttf  Copyright 2020 The Dela Gothic Project Authors (https://github.com/syakuzen/DelaGothic)
+RocknRollOne.ttf   Copyright 2020 The RocknRoll Project Authors (https://github.com/fontworks-fonts/RocknRoll)
+ReggaeOne.ttf      Copyright 2020 The Reggae Project Authors (https://github.com/fontworks-fonts/Reggae/)
+Anton.ttf          Copyright 2020 The Anton Project Authors (https://github.com/googlefonts/AntonFont.git)
+BlackOpsOne.ttf    Copyright 2022 The Black Ops One Project Authors (https://github.com/SorkinType/Black-Ops)
+Bungee.ttf         Copyright 2023 The Bungee Project Authors (https://github.com/djrrb/Bungee)

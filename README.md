@@ -127,3 +127,68 @@ python glitch_intro.py --still 4.6      # tek kareyi PNG kaydet
 - `output/taslak/` - onay için storyboard, hareket önizlemesi ve referansla senkron karşılaştırma
 
 Linux'ta sunucuda çalıştırmak için `libegl1` gerekir (ekran kartı gerekmez, llvmpipe ile çalışır).
+
+---
+
+# QUEEN (LiSA) - Fan Yapımı Lyric Video (1 dakika, 2B)
+
+Şarkının ilk dakikası için patlamalı, geçişli, kamera sarsıntılı 2B lyric video.
+Ana yazılar kanji, altında küçük romaji; her karakter söylendiği an renk değiştirip zıplar,
+romaji soldan sağa dolar. Sağ altta sürekli "LiSA — QUEEN" ve videonun fan yapımı olduğunu,
+şarkının haklarının sahiplerine ait olduğunu belirten not durur.
+
+Çıktı: `output/queen_lyric_video.mp4` (1920x1080, 60 fps, H.264 + AAC, 61 sn).
+**Şarkı ve sözler telifli olduğu için repoya eklenmez** (`input/` ve bu video `.gitignore`'da);
+video kullanıcıya doğrudan gönderilir.
+
+| Saniye       | Görüntü                                                                                           |
+|--------------|---------------------------------------------------------------------------------------------------|
+| 0.0 - 0.5    | CRT açılışı, ilk vuruşta patlama                                                                  |
+| 0.5 - 12.4   | Kırmızı/yeşil ikiye bölünmüş ekran, uyarı bandı, tram noktaları, trafik lambaları; lamba tabelası hece hece yanar, kanji damga gibi iner, köşe etiketleri, lambalı şeritler |
+| 12.4 - 14.07 | Durak: ekran kararır, 12.77 kırmızı ve 13.32 yeşil dev flaş + patlama, hız çizgileri merkeze çöker |
+| **14.07**    | **Dev patlama**: beyaz flaş, iki karelik ters renk, şok dalgaları, kırıklar, kromatik sapma       |
+| 14.07 - 20.7 | Sözsüz fırtına bölümü: yağmur, bulutlar, şimşekler; ANDROE harfleri vuruşlarla düşer, STUDIO açılır; 17.44'te şimşekle taçlı QUEEN başlığı, 19.11'de LiSA |
+| 20.7 - 27.7  | Pençe çizikleri ve yükselen kalpler; yumuşak parıltılardan keskin altın yıldızlara geçiş          |
+| 27.7 - 34.4  | Ekranı yarıp geçen damgalar (hız çizgileri, akan oklar), uçuşan kurdeleler ve tüyler, dalgalar    |
+| 34.4 - 48.09 | Kalp/çarpı zikzak ekran + mühür damgası; girdap ve HP çubuğu; soru işaretleri, şimşek, doğru cevap halkası + konfeti; açan çiçekler, kamera içeri girer |
+| **48.09**    | **Nakarat patlaması**                                                                             |
+| 48.09 - 54.86| Gece göğü, bulutlar ikiye yarılır, dev ay; dans halkaları ve notalar                              |
+| **54.86**    | **Dev patlama** (60 saniyedeki en güçlü zil vuruşu)                                               |
+| 54.86 - 60.09| Konser sahnesi: hareketli ışık huzmeleri, lazerler, ses halkaları; son uzun notada yazı ve kamera giderek daha çok titrer |
+| 60.09 - 61.0 | Final patlaması (görüntü + `sound.impact` sesi), siyahta ANDROE STUDIO                            |
+
+Sahne geçişleri: çapraz bıçak, panjur ve şerit perdeler (0.3 sn), büyük anlarda beyaz flaş.
+Her vuruşta kamera sarsılır (güce göre 5-42 px, dönmeli), yazılar harf harf titrer.
+
+## Senkron
+
+Zamanlama `queen_timing.py`'dedir, şarkı analiz edilerek çıkarılmıştır:
+vuruş ızgarası librosa `beat_track` ile (~141 BPM), vokal stereo merkez kanal + armonik
+ayrıştırma ve Melodia perde takibiyle bulundu; her söz parçasının başlangıcı vokal girişine
+(±0.04 sn) oturtuldu. Patlama anları yüksek frekans (zil) sıçramaları ve bölüm geçişleridir.
+Bir satır kayık gelirse yalnızca `LINES` içindeki saniyeyi değiştirmek yeterlidir.
+
+## Çalıştırma
+
+`input/` klasörüne kendi dosyalarını koy:
+
+- `input/queen.mp3` - şarkı (tam sürüm; ilk 61 saniyesi kullanılır)
+- `input/queen_sozler.txt` - 0:00-1:00 sözleri, `LINES` sırasıyla, her satır
+  `kanji parçaları " / " ile | romaji parçaları " / " ile` (parça sayısı `LINES` ile aynı)
+
+```bash
+pip install -r requirements.txt
+python queen.py                      # output/queen_lyric_video.mp4 (tüm çekirdeklerle paralel)
+python queen.py --still 14.2         # tek kare PNG
+python queen.py --preview            # 960x540, 30 fps hızlı önizleme
+python queen.py --sheet 0 61 48      # 48 karelik kontak baskı
+```
+
+## Dosyalar
+
+- `queen.py` - sözleri yükler, kareleri paralel render eder, şarkıyı keser, final sesini ekler, MP4 yazar
+- `queen_timing.py` - vuruşlar, söz parçalarının zamanları, patlama anları, sahneler (söz metni içermez)
+- `queen_scene.py` - yazı motoru (kanji + romaji, giriş/çıkış, renk dolumu), özel parçalar, kamera, patlamalar, geçişler
+- `queen_bg.py` - sahne arka planları (sinyal, fırtına, ay, konser ışıkları vb.)
+- `queen_fx.py` - 2B şekiller ve efektler (patlama, şok dalgası, şimşek, kırıklar, hız çizgileri, desenler)
+- `fonts/` - Dela Gothic One, RocknRoll One, Reggae One, Anton, Black Ops One, Bungee (SIL OFL, bkz. `fonts/QUEEN-FONTS.txt`)
