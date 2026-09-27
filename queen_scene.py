@@ -880,12 +880,10 @@ class QueenScene:
                                                 [col(INK, 0).toColor(), col(INK, 0).toColor(), col(INK, 0.55).toColor()],
                                                 [0.0, 0.6, 1.0])
         c.drawPaint(skia.Paint(Shader=shader))
-        self.draw_credit(c, t)
         c.restore()
 
     def post(self, rgb, t):
         """Kromatik sapma ve dev vuruşlarda iki karelik ters renk."""
-        orig = rgb
         ca = 0.0
         for th, pw, kind in HITS:
             if pw >= 2 and th <= t < th + 0.5:
@@ -899,14 +897,32 @@ class QueenScene:
             rgb = out
         for th, pw, kind in HITS:
             if pw >= 4 and kind != "final" and th <= t < th + 2.0 / self.fps:
-                rgb = 255 - rgb if rgb is orig else np.subtract(255, rgb, out=rgb)
-        if rgb is not orig:                              # sağ alttaki yazı efektlerden etkilenmez
-            y0, x0 = int((H - 130) * self.k), int((W - 700) * self.k)
-            rgb[y0:, x0:] = orig[y0:, x0:]
+                rgb = 255 - rgb
         return rgb
+
+    def credit_overlay(self, rgb, t):
+        """Sağ alttaki yazı en son, flaş ve renk efektlerinin üstüne ayrı katman olarak eklenir."""
+        if span(t, 0.5, 0.9) <= 0:
+            return rgb
+        cw, ch = int(round(760 * self.k)), int(round(140 * self.k))
+        if not hasattr(self, "credit_surf"):
+            self.credit_surf = skia.Surface(cw, ch)
+        with self.credit_surf as c:
+            c.clear(skia.Color4f(0, 0, 0, 0))
+            c.save()
+            c.scale(self.k, self.k)
+            c.translate(-(W - 760), -(H - 140))
+            self.draw_credit(c, t)
+            c.restore()
+        ov = self.credit_surf.toarray(colorType=skia.kRGBA_8888_ColorType,
+                                      alphaType=skia.kPremul_AlphaType).astype(np.float32)
+        out = np.array(rgb, copy=True)
+        region = out[-ch:, -cw:].astype(np.float32)
+        out[-ch:, -cw:] = (ov[..., :3] + region * (1 - ov[..., 3:] / 255.0) + 0.5).astype(np.uint8)
+        return out
 
     def render(self, t):
         with self.surface as c:
             self.draw(c, t)
         rgb = self.surface.toarray(colorType=skia.kRGBA_8888_ColorType)[..., :3]
-        return np.ascontiguousarray(self.post(rgb, t))
+        return np.ascontiguousarray(self.credit_overlay(self.post(rgb, t), t))
