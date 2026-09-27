@@ -6,7 +6,6 @@ Tüm ölçüler 1920x1080 tasarım alanındadır.
 """
 import math
 
-import numpy as np
 import skia
 
 W, H = 1920, 1080
@@ -132,26 +131,6 @@ def poly(points, close=True):
     return p
 
 
-def star(cx, cy, ro, ri, n=5, rot=0.0):
-    pts = []
-    for i in range(2 * n):
-        a = rot + math.pi * i / n - math.pi / 2
-        r = ro if i % 2 == 0 else ri
-        pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
-    return poly(pts)
-
-
-def burst(cx, cy, ri, ro, n, seed, rot=0.0, jitter=0.45):
-    """Manga patlama yıldızı: uzunlukları rastgele sivri uçlar."""
-    pts = []
-    for i in range(2 * n):
-        a = rot + math.pi * i / n
-        if i % 2 == 0:
-            r = ro * (1 - jitter * hash01(i, seed))
-        else:
-            r = ri * (0.85 + 0.3 * hash01(i, seed, 1))
-        pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
-    return poly(pts)
 
 
 def sparkle(cx, cy, r, rot=0.0, thin=0.18):
@@ -187,19 +166,6 @@ def crown(cx, cy, s):
     return poly([(cx + x * s, cy + y * s) for x, y in pts])
 
 
-def flower(cx, cy, r, petals=5, rot=0.0):
-    p = skia.Path()
-    for i in range(petals):
-        a = rot + 2 * math.pi * i / petals
-        m = skia.Matrix()
-        m.setRotate(math.degrees(a))
-        m.postTranslate(cx, cy)
-        e = skia.Path()
-        e.addOval(skia.Rect(0.12 * r, -0.28 * r, r, 0.28 * r))
-        e.transform(m)
-        p.addPath(e)
-    return p
-
 
 def note(cx, cy, s):
     """Sekizlik nota."""
@@ -222,11 +188,6 @@ def note(cx, cy, s):
     return p
 
 
-def chevron(cx, cy, s, direction=1):
-    d = direction
-    return poly([(cx - 0.35 * s * d, cy - 0.5 * s), (cx + 0.15 * s * d, cy - 0.5 * s), (cx + 0.55 * s * d, cy),
-                 (cx + 0.15 * s * d, cy + 0.5 * s), (cx - 0.35 * s * d, cy + 0.5 * s), (cx + 0.05 * s * d, cy)])
-
 
 def bolt_points(x0, y0, x1, y1, seed, depth=5, jag=0.22):
     """Orta nokta kaydırmalı şimşek çizgisi."""
@@ -246,20 +207,6 @@ def bolt_points(x0, y0, x1, y1, seed, depth=5, jag=0.22):
     return pts
 
 
-def hanko(c, cx, cy, r, rgb, a=1.0, rot=0.0):
-    """Japon mühür damgası: çift halka, pürüzlü mürekkep."""
-    c.save()
-    c.translate(cx, cy)
-    c.rotate(math.degrees(rot))
-    c.drawCircle(0, 0, r, stroke(rgb, r * 0.11, a))
-    c.drawCircle(0, 0, r * 0.8, stroke(rgb, r * 0.035, a))
-    for i in range(14):                                   # mürekkep boşlukları
-        ang = 2 * math.pi * hash01(i, 7)
-        rr = r * (0.94 + 0.06 * hash01(i, 8))
-        c.drawCircle(rr * math.cos(ang), rr * math.sin(ang), r * 0.035 * (0.5 + hash01(i, 9)),
-                     fill(INK, a * 0.9))
-    c.restore()
-
 
 # ---------------------------------------------------------------- efektler
 
@@ -271,88 +218,7 @@ def shockwave(c, t, t0, x, y, rmax, rgb, dur=0.5, width=26.0, a=1.0):
     c.drawCircle(x, y, r, stroke(rgb, width * (1 - u) + 1, a * (1 - u) ** 1.5))
 
 
-def speedlines(c, cx, cy, n, r_in, r_out, rgb, a, seed, width=14.0, t=0.0):
-    """Merkeze doğru incelen manga hız çizgileri."""
-    p = skia.Path()
-    for i in range(n):
-        ang = 2 * math.pi * (i + hash01(i, seed)) / n + t * 0.15
-        ri = r_in * (1 + 0.6 * hash01(i, seed, int(t * 30)))
-        w = width * (0.4 + hash01(i, seed, 3)) / 2
-        ca, sa = math.cos(ang), math.sin(ang)
-        p.moveTo(cx + ri * ca, cy + ri * sa)
-        p.lineTo(cx + r_out * ca - w * sa, cy + r_out * sa + w * ca)
-        p.lineTo(cx + r_out * ca + w * sa, cy + r_out * sa - w * ca)
-        p.close()
-    c.drawPath(p, fill(rgb, a))
 
-
-def debris(c, t, t0, x, y, n, speed, life, palette, seed, size=14.0, gravity=900.0):
-    """Patlamadan saçılan 2B kırıklar (üçgen/dörtgen), sürtünme ve yerçekimiyle."""
-    dt = t - t0
-    if dt < 0 or dt > life * 1.6:
-        return
-    drag = 3.2
-    for i in range(n):
-        ang = 2 * math.pi * hash01(i, seed)
-        v = speed * (0.3 + 0.9 * hash01(i, seed, 1))
-        k = (1 - math.exp(-drag * dt)) / drag              # sürtünmeli yol
-        px = x + math.cos(ang) * v * k
-        py = y + math.sin(ang) * v * k + 0.5 * gravity * dt * dt * 0.35
-        li = life * (0.5 + hash01(i, seed, 2))
-        fade = 1 - span(dt, 0.25 * li, li)
-        if fade <= 0:
-            continue
-        s = size * (0.5 + hash01(i, seed, 3)) * (1 - 0.5 * dt / li)
-        rot = hash01(i, seed, 4) * 6.28 + dt * (hash01(i, seed, 5) - 0.5) * 20
-        rgb = palette[i % len(palette)]
-        c.save()
-        c.translate(px, py)
-        c.rotate(math.degrees(rot))
-        if i % 3 == 0:
-            c.drawPath(poly([(-s, -s * 0.6), (s, 0), (-s * 0.5, s * 0.7)]), fill(rgb, fade))
-        elif i % 3 == 1:
-            c.drawRect(skia.Rect(-s * 0.9, -s * 0.25, s * 0.9, s * 0.25), fill(rgb, fade))
-        else:
-            c.drawPath(sparkle(0, 0, s * 1.1), fill(rgb, fade))
-        c.restore()
-
-
-def explosion(c, t, t0, x, y, size, palette, seed, power=3):
-    """Çok katmanlı 2B patlama: ışık diski, manga yıldızı, şok dalgaları, kıvılcım ve kırıklar."""
-    dt = t - t0
-    if dt < 0 or dt > 1.8:
-        return
-    main, second = palette[0], palette[1 % len(palette)]
-    # parlayan çekirdek
-    if dt < 0.35:
-        u = dt / 0.35
-        r = size * (0.25 + 0.9 * ease_out(u))
-        c.drawCircle(x, y, r * 1.3, fill(main, 0.55 * (1 - u), blur=size * 0.18, blend=ADD))
-        c.drawCircle(x, y, r * 0.8, fill(WHITE, (1 - u) ** 2))
-    # manga yıldızı (iki katman, dönük)
-    if dt < 0.3:
-        u = dt / 0.3
-        s = size * (0.5 + 1.1 * ease_out(u))
-        a = 1 - u ** 2
-        c.drawPath(burst(x, y, s * 0.45, s * 1.25, 14, seed, rot=seed), fill(main, a))
-        c.drawPath(burst(x, y, s * 0.3, s * 0.85, 11, seed + 1, rot=seed + 0.2), fill(WHITE, a))
-    # şok dalgaları
-    shockwave(c, t, t0, x, y, size * 2.6, WHITE, dur=0.45, width=size * 0.14)
-    shockwave(c, t, t0 + 0.05, x, y, size * 3.4, main, dur=0.6, width=size * 0.09)
-    if power >= 4:
-        shockwave(c, t, t0 + 0.1, x, y, size * 5.0, second, dur=0.8, width=size * 0.07)
-    # ışınsal kıvılcım çizgileri
-    if dt < 0.5:
-        u = dt / 0.5
-        n = 18 if power >= 3 else 10
-        for i in range(n):
-            ang = 2 * math.pi * (i + hash01(i, seed, 11)) / n
-            r0 = size * (0.4 + 2.6 * ease_out(u))
-            r1 = r0 + size * (0.5 + 0.8 * hash01(i, seed, 12)) * (1 - u)
-            c.drawLine(x + r0 * math.cos(ang), y + r0 * math.sin(ang), x + r1 * math.cos(ang), y + r1 * math.sin(ang),
-                       stroke(second if i % 2 else WHITE, size * 0.05 * (1 - u) + 1, 1 - u))
-    # kırıklar ve parıltılar
-    debris(c, t, t0, x, y, 26 if power >= 3 else 14, size * 5.5, 1.1, palette + (WHITE,), seed, size=size * 0.09)
 
 
 def lightning(c, t, t0, x0, y0, x1, y1, seed, rgb=(0.75, 0.85, 1.0), dur=0.32, width=9.0):
@@ -374,35 +240,54 @@ def lightning(c, t, t0, x0, y0, x1, y1, seed, rgb=(0.75, 0.85, 1.0), dur=0.32, w
     return flick
 
 
-def pattern_image(kind, size=64, rgb=WHITE):
-    """Döşenebilir desen: 'dots' (tram), 'stripes' (çapraz şerit), 'grid'."""
-    surf = skia.Surface(size, size)
-    with surf as c:
-        c.clear(skia.Color4f(0, 0, 0, 0))
-        if kind == "dots":
-            r = size * 0.22
-            for x, y in ((0, 0), (size, 0), (0, size), (size, size), (size / 2, size / 2)):
-                c.drawCircle(x, y, r, fill(rgb))
-        elif kind == "stripes":
-            p = poly([(0, 0), (size * 0.5, 0), (0, size * 0.5)])
-            p2 = poly([(size, size * 0.5), (size, size), (size * 0.5, size)])
-            q = poly([(size * 0.5, 0), (size, 0), (size, size * 0.5), (size * 0.5, size), (0, size), (0, size * 0.5)])
-            c.drawPath(q, fill(rgb))
-            del p, p2
-        elif kind == "grid":
-            c.drawLine(0, 0, size, 0, stroke(rgb, 2))
-            c.drawLine(0, 0, 0, size, stroke(rgb, 2))
-    return surf.makeImageSnapshot()
 
 
-def tiled(c, image, rgb, a, scale=1.0, rot=0.0, dx=0.0, dy=0.0, rect=None):
-    """Desen görüntüsünü tüm alana döşer (renk ve saydamlıkla)."""
-    m = skia.Matrix()
-    m.setScale(scale, scale)
-    m.postRotate(rot)
-    m.postTranslate(dx, dy)
-    shader = image.makeShader(skia.TileMode.kRepeat, skia.TileMode.kRepeat, skia.SamplingOptions(), m)
-    p = skia.Paint(AntiAlias=True, Shader=shader)
-    p.setColorFilter(skia.ColorFilters.Blend(col(rgb), skia.BlendMode.kSrcIn))
-    p.setAlphaf(clamp01(a))
-    c.drawRect(rect or skia.Rect(-200, -200, W + 200, H + 200), p)
+def flare_burst(c, t, t0, x, y, size, palette, seed, power=3):
+    """Modern patlama: parlayan çekirdek, ince genişleyen halkalar, ışınsal kıvılcım çizgileri,
+    sürtünmeyle yavaşlayan parlak parçacıklar. Manga yıldızı ve üçgen kırık yok."""
+    dt = t - t0
+    if dt < 0 or dt > 1.6:
+        return
+    main, second = palette[0], palette[1 % len(palette)]
+    if dt < 0.45:                                          # çekirdek ışığı
+        u = dt / 0.45
+        r = size * (0.6 + 2.6 * ease_out(u))
+        shader = skia.GradientShader.MakeRadial(skia.Point(x, y), r, [col(WHITE, (1 - u) ** 1.5).toColor(),
+                                                                       col(main, 0.6 * (1 - u)).toColor(),
+                                                                       col(main, 0).toColor()], [0.0, 0.25, 1.0])
+        p = skia.Paint(AntiAlias=True, Shader=shader)
+        p.setBlendMode(ADD)
+        c.drawCircle(x, y, r, p)
+    for k, (dl, dur, rmax, w) in enumerate(((0.0, 0.5, 3.2, 5.0), (0.06, 0.65, 4.4, 3.0), (0.12, 0.8, 5.6, 2.0))):
+        if k == 2 and power < 4:
+            break
+        u = (dt - dl) / dur
+        if 0 <= u < 1:
+            c.drawCircle(x, y, size * rmax * ease_out(u), stroke(WHITE if k == 0 else (main, second)[k % 2],
+                                                                  w * (1 - u) + 0.8, (1 - u) ** 1.3))
+    if dt < 0.5:                                           # ışınsal kıvılcım çizgileri
+        u = dt / 0.5
+        n = 26 if power >= 3 else 14
+        path = skia.Path()
+        for i in range(n):
+            ang = 2 * math.pi * (i + hash01(i, seed, 11)) / n
+            r0 = size * (0.5 + 3.4 * ease_out(u))
+            r1 = r0 + size * (0.6 + 1.2 * hash01(i, seed, 12)) * (1 - u)
+            path.moveTo(x + r0 * math.cos(ang), y + r0 * math.sin(ang))
+            path.lineTo(x + r1 * math.cos(ang), y + r1 * math.sin(ang))
+        c.drawPath(path, stroke(WHITE, 2.2, 1 - u))
+    drag = 3.0
+    k_path = {}
+    for i in range(34 if power >= 3 else 18):              # parlak parçacıklar
+        ang = 2 * math.pi * hash01(i, seed, 21)
+        v = size * 7 * (0.3 + 0.9 * hash01(i, seed, 22))
+        kk = (1 - math.exp(-drag * dt)) / drag
+        px, py = x + math.cos(ang) * v * kk, y + math.sin(ang) * v * kk + 120 * dt * dt
+        life = 0.6 + 0.7 * hash01(i, seed, 23)
+        a = 1 - span(dt, 0.3 * life, life)
+        if a <= 0:
+            continue
+        rgb = (WHITE, main, second)[i % 3]
+        k_path.setdefault((rgb, round(a, 2)), skia.Path()).addCircle(px, py, 2.0 + 3.0 * hash01(i, seed, 24) * (1 - dt))
+    for (rgb, a), path in k_path.items():
+        c.drawPath(path, fill(rgb, a))

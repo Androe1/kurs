@@ -9,7 +9,12 @@ Kullanım:
     python queen.py --still 14.2         # yalnızca o andaki kareyi PNG kaydet
     python queen.py --preview            # hızlı önizleme: 960x540, 30 fps
     python queen.py --sheet 0 61 24      # 24 karelik kontak baskı (kontrol için)
+    python queen.py --rebake             # dansçı koreografisini/fiziğini yeniden hesapla
+
+Dansçıların koreografisi ve saç/etek fiziği bir kez hesaplanır (renders/queen_bake.npz,
+~1 dakika); queen_choreo.py, queen_dancers.py ya da queen_timing.py değişince kendiliğinden yenilenir.
 """
+import os
 import argparse
 import multiprocessing as mp
 import subprocess
@@ -24,6 +29,7 @@ import imageio_ffmpeg
 import numpy as np
 import skia
 
+from queen_choreo import save_bake
 from queen_scene import QueenScene
 from queen_timing import AUDIO_FADE, DURATION, FINAL_HIT
 from sound import SR, Mixer, convolve, impact, reverb_ir, write_wav
@@ -48,10 +54,26 @@ def save_png(rgb, path):
     skia.Image.fromarray(np.ascontiguousarray(rgba), colorType=skia.kRGBA_8888_ColorType).save(str(path), skia.kPNG)
 
 
+BAKE = ROOT / "renders" / "queen_bake.npz"
+
+
+def ensure_bake(force=False):
+    """Dansçı hareketlerini (iskelet + saç + etek) hesaplayıp önbelleğe yazar."""
+    deps = [ROOT / n for n in ("queen_choreo.py", "queen_dancers.py", "queen_timing.py")]
+    if force or not BAKE.exists() or BAKE.stat().st_mtime < max(d.stat().st_mtime for d in deps):
+        BAKE.parent.mkdir(parents=True, exist_ok=True)
+        start = time.time()
+        print("Dansçı koreografisi ve fiziği hesaplanıyor...", flush=True)
+        save_bake(str(BAKE))
+        print(f"Hazır ({time.time() - start:.0f} sn)")
+    return str(BAKE)
+
+
 def _render_chunk(args):
     """Bir çalışan: kendi kare aralığını render edip ayrı bir video parçası yazar."""
-    lyrics, width, height, fps, f0, f1, out = args
-    scene = QueenScene(lyrics, width, height, fps)
+    lyrics, width, height, fps, f0, f1, out, bake = args
+    os.environ.setdefault("LP_NUM_THREADS", "1")          # llvmpipe: çalışan başına tek iş parçacığı
+    scene = QueenScene(lyrics, width, height, fps, bake_path=bake)
     cmd = [FFMPEG, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}",
            "-r", str(fps), "-i", "-", "-c:v", "libx264", "-preset", "medium", "-crf", "16",
            "-vf", "scale=out_color_matrix=bt709:out_range=tv", "-pix_fmt", "yuv420p",
@@ -87,12 +109,12 @@ def cut_audio(song, wav):
     write_wav(wav, mix)
 
 
-def render_video(lyrics, song, out, width, height, fps, workers):
+def render_video(lyrics, song, out, width, height, fps, workers, bake):
     frames = round(DURATION * fps)
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         bounds = np.linspace(0, frames, workers * 3 + 1).round().astype(int)
-        jobs = [(lyrics, width, height, fps, int(bounds[i]), int(bounds[i + 1]), tmp / f"part{i:03d}.mp4")
+        jobs = [(lyrics, width, height, fps, int(bounds[i]), int(bounds[i + 1]), tmp / f"part{i:03d}.mp4", bake)
                 for i in range(len(bounds) - 1)]
         start = time.time()
         with mp.get_context("spawn").Pool(workers) as pool:
@@ -109,8 +131,8 @@ def render_video(lyrics, song, out, width, height, fps, workers):
         subprocess.run(cmd, check=True)
 
 
-def contact_sheet(lyrics, t0, t1, n, path, cols=6):
-    scene = QueenScene(lyrics, 480, 270, 60)
+def contact_sheet(lyrics, t0, t1, n, path, bake, cols=6):
+    scene = QueenScene(lyrics, 480, 270, 60, bake_path=bake)
     times = np.linspace(t0, t1, n, endpoint=False)
     rows = int(np.ceil(n / cols))
     sheet = np.zeros((rows * 290, cols * 490, 3), np.uint8)
@@ -133,6 +155,7 @@ def main():
     parser.add_argument("--preview", action="store_true", help="960x540, 30 fps hızlı önizleme")
     parser.add_argument("--still", type=float, metavar="SANIYE", help="yalnızca bu andaki kareyi PNG kaydet")
     parser.add_argument("--sheet", type=float, nargs=3, metavar=("BAS", "SON", "ADET"), help="kontak baskı")
+    parser.add_argument("--rebake", action="store_true", help="dansçı hareketlerini yeniden hesapla")
     args = parser.parse_args()
 
     for p, what in ((args.lyrics, "söz dosyası"), (args.song, "şarkı")):
@@ -146,8 +169,9 @@ def main():
         if args.output == parser.get_default("output"):
             out = out.with_name("queen_onizleme.mp4")
 
+    bake = ensure_bake(args.rebake)
     if args.still is not None:
-        scene = QueenScene(lyrics, args.width, args.height, args.fps)
+        scene = QueenScene(lyrics, args.width, args.height, args.fps, bake_path=bake)
         path = out.with_name(f"queen_kare_{args.still:.2f}.png")
         save_png(scene.render(args.still), path)
         print(f"Kaydedildi: {path}")
@@ -155,12 +179,12 @@ def main():
     if args.sheet:
         t0, t1, n = args.sheet
         path = out.with_name(f"queen_kontak_{t0:.0f}_{t1:.0f}.png")
-        contact_sheet(lyrics, t0, t1, int(n), path)
+        contact_sheet(lyrics, t0, t1, int(n), path, bake)
         print(f"Kaydedildi: {path}")
         return
 
     start = time.time()
-    render_video(lyrics, args.song, out, args.width, args.height, args.fps, args.workers)
+    render_video(lyrics, args.song, out, args.width, args.height, args.fps, args.workers, bake)
     print(f"Hazır: {out}  ({time.time() - start:.0f} sn)")
 
 
