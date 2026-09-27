@@ -19,7 +19,6 @@ import argparse
 import multiprocessing as mp
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -101,7 +100,7 @@ def cut_audio(song, wav):
     mx = Mixer(DURATION)
     impact(mx, FINAL_HIT, rng)
     boom = mx.dry + 0.5 * convolve(mx.send, reverb_ir(rng, length=2.0, rt60=1.1))
-    boom /= np.abs(boom).max()
+    boom /= max(float(np.abs(boom).max()), 1e-9)
     n = min(len(music), len(boom))
     mix = music[:n] + 0.6 * boom[:n]
     over = np.abs(mix) > 0.9                              # yalnızca taşan tepeleri yumuşak kırp
@@ -111,24 +110,28 @@ def cut_audio(song, wav):
 
 def render_video(lyrics, song, out, width, height, fps, workers, bake):
     frames = round(DURATION * fps)
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp = Path(tmp)
-        bounds = np.linspace(0, frames, workers * 3 + 1).round().astype(int)
-        jobs = [(lyrics, width, height, fps, int(bounds[i]), int(bounds[i + 1]), tmp / f"part{i:03d}.mp4", bake)
-                for i in range(len(bounds) - 1)]
-        start = time.time()
-        with mp.get_context("spawn").Pool(workers) as pool:
-            for n, _ in enumerate(pool.imap(_render_chunk, jobs), 1):
-                print(f"\rParça {n}/{len(jobs)}  ({time.time() - start:.0f} sn)", end="", flush=True)
-        print()
-        lst = tmp / "list.txt"
-        lst.write_text("".join(f"file '{j[-1]}'\n" for j in jobs))
-        wav = tmp / "ses.wav"
-        cut_audio(song, wav)
-        cmd = [FFMPEG, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(lst), "-i", str(wav),
-               "-map", "0:v", "-map", "1:a", "-map_metadata", "-1", "-c:v", "copy", "-c:a", "aac", "-b:a", "320k",
-               "-t", f"{DURATION}", "-movflags", "+faststart", str(out)]
-        subprocess.run(cmd, check=True)
+    # parçalar renders/ altında tutulur; birleştirme başarısız olursa render kaybolmaz
+    tmp = ROOT / "renders" / "queen_parts"
+    tmp.mkdir(parents=True, exist_ok=True)
+    bounds = np.linspace(0, frames, workers * 3 + 1).round().astype(int)
+    parts = [tmp / f"part{i:03d}.mp4" for i in range(len(bounds) - 1)]
+    jobs = [(lyrics, width, height, fps, int(bounds[i]), int(bounds[i + 1]), parts[i], bake)
+            for i in range(len(parts))]
+    start = time.time()
+    with mp.get_context("spawn").Pool(workers) as pool:
+        for n, _ in enumerate(pool.imap(_render_chunk, jobs), 1):
+            print(f"\rParça {n}/{len(jobs)}  ({time.time() - start:.0f} sn)", end="", flush=True)
+    print()
+    lst = tmp / "list.txt"
+    lst.write_text("".join(f"file '{p}'\n" for p in parts))
+    wav = tmp / "ses.wav"
+    cut_audio(song, wav)
+    cmd = [FFMPEG, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(lst), "-i", str(wav),
+           "-map", "0:v", "-map", "1:a", "-map_metadata", "-1", "-c:v", "copy", "-c:a", "aac", "-b:a", "320k",
+           "-t", f"{DURATION}", "-movflags", "+faststart", str(out)]
+    subprocess.run(cmd, check=True)
+    for p in parts + [lst, wav]:
+        p.unlink(missing_ok=True)
 
 
 def contact_sheet(lyrics, t0, t1, n, path, bake, cols=6):
