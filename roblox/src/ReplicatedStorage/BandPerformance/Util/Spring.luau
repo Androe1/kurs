@@ -8,18 +8,13 @@
 	damping: sönüm oranı ζ               - 1 = kritik, <1 = aşar (overshoot), >1 = ağır sönüm
 ]]
 
-export type Spring = {
-	x: number,
-	v: number,
-	freq: number,
-	damping: number,
-}
-
 local Spring = {}
 Spring.__index = Spring
 
+export type Spring = typeof(setmetatable({} :: { x: number, v: number, freq: number, damping: number }, Spring))
+
 function Spring.new(x: number, freq: number, damping: number): Spring
-	return setmetatable({ x = x, v = 0, freq = freq, damping = damping }, Spring) :: any
+	return setmetatable({ x = x, v = 0, freq = freq, damping = damping }, Spring)
 end
 
 -- tek adım: (konum, hız) döndürür
@@ -88,20 +83,17 @@ function Spring.reset(self: Spring, x: number)
 end
 
 -- Üç eksenli yay (Vector3 değer)
-export type Spring3 = {
-	x: Spring,
-	y: Spring,
-	z: Spring,
-}
 local Spring3 = {}
 Spring3.__index = Spring3
+
+export type Spring3 = typeof(setmetatable({} :: { x: Spring, y: Spring, z: Spring }, Spring3))
 
 function Spring3.new(value: Vector3, freq: number, damping: number): Spring3
 	return setmetatable({
 		x = Spring.new(value.X, freq, damping),
 		y = Spring.new(value.Y, freq, damping),
 		z = Spring.new(value.Z, freq, damping),
-	}, Spring3) :: any
+	}, Spring3)
 end
 
 function Spring3.step(self: Spring3, target: Vector3, dt: number): Vector3

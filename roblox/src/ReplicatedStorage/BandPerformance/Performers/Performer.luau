@@ -94,14 +94,27 @@ function Performer.new(rig: any, role: string, opts: { score: any, clock: any, s
 
 	PerformerState.init(self)
 	-- sıra önemli: Base -> Enstrüman (niyet/bakış) -> Groove (yaylar adımlanır, kafa bakışı okur)
-	table.insert(self.layers, BaseLayer.new(self))
+	local baseLayer: any = BaseLayer.new(self)
+	table.insert(self.layers, baseLayer)
 	if opts.instrument then
 		local layer = opts.instrument(self)
 		self.instrument = layer
 		table.insert(self.layers, layer)
 	end
-	table.insert(self.layers, GrooveLayer.new(self))
+	local grooveLayer: any = GrooveLayer.new(self)
+	table.insert(self.layers, grooveLayer)
 	return self
+end
+
+-- Yumuşatılmış darbe: tek karede hız basamağı yerine 3 parçaya (30/40/30%) ~36 ms'ye yayar. Yaylar doğrusal olduğu için
+-- ilk tepe genliği korunur; başlangıç sert "tık" yerine kütleli bir çökme gibi okunur.
+function Performer.kick(self: any, t: number, spring: any, amp: number)
+	local parts = { { 0, 0.3 }, { 0.018, 0.4 }, { 0.036, 0.3 } }
+	for _, p in parts do
+		self:at(t + p[1], function()
+			spring:impulseForPeak(amp * p[2])
+		end)
+	end
 end
 
 -- ───── zamanlayıcı: olay zamanına bağlı gecikmeli eylem ─────
@@ -148,8 +161,9 @@ function Performer.resync(self: any, now: number)
 	self.cursors = {}
 	self.beatCursor = -1
 	for _, l in self.layers do
-		if (l :: any).resync then
-			(l :: any).resync(l, self, now)
+		local rs = (l :: any).resync
+		if rs then
+			rs(l, self, now)
 		end
 	end
 end

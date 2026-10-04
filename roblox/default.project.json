@@ -1,0 +1,21 @@
+{
+  "name": "BandPerformance",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "BandPerformance": { "$path": "src/ReplicatedStorage/BandPerformance" }
+    },
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "BandServer": { "$path": "src/ServerScriptService/BandServer.server.luau" }
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "BandClient": { "$path": "src/StarterPlayer/StarterPlayerScripts/BandClient.client.luau" }
+      }
+    }
+  }
+}

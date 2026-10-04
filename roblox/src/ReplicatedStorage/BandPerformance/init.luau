@@ -41,6 +41,10 @@ export type Band = {
 local BandPerformance = {}
 BandPerformance.__index = BandPerformance
 BandPerformance.Config = Config
+BandPerformance.CameraRig = require(Root.CameraRig)
+BandPerformance.PropBuilder = PropBuilder
+BandPerformance.Performer = require(Root.Performers.Performer)
+BandPerformance.Pose = require(Root.Layers.Pose)
 
 local ROLES: { [string]: (any, any) -> any } = {
 	Guitar = Guitarist.create,
@@ -108,6 +112,8 @@ end
 	buildProps: boolean (varsayılan true), propsParent: Instance?
 	autoFacing: Config.profiles[role].facing kadar karakteri döndür (varsayılan false)
 	seed: number
+	getCameraPosition: () -> Vector3?   LOD için kamera konumu (yoksa her performer her kare güncellenir)
+	cullDistance: number                 bu uzaklıktan uzak performer güncellenmez (varsayılan 220 stud); geri gelince yumuşak geçişle senkronlanır
 ]]
 function BandPerformance.new(opts: any): Band
 	opts = opts or {}
@@ -138,6 +144,8 @@ function BandPerformance.new(opts: any): Band
 		performers = {},
 		order = {},
 		props = {},
+		getCameraPosition = opts.getCameraPosition,
+		cullDistance = opts.cullDistance or 220,
 		timeSource = opts.timeSource or (function(): (number?, boolean) return nil, false end),
 		freeRun = opts.freeRun == true,
 		time = 0,
@@ -154,6 +162,7 @@ function BandPerformance.new(opts: any): Band
 			end
 		end
 		local rig = R15Rig.new(e.model)
+		rig:reset() -- önceki bir animasyondan kalan Transform'lar dinlenme pozunu bozmasın
 		local perf = ROLES[e.role](rig, {
 			score = score, clock = clock, seed = Rng.seedFromString(e.model.Name),
 		})
@@ -183,8 +192,15 @@ function BandPerformance.update(self: any, dt: number)
 	else
 		self.clock:update(dt, t, playing)
 	end
+	local camPos = self.getCameraPosition and self.getCameraPosition() or nil
 	for _, role in self.order do
-		self.performers[role]:update(dt)
+		local p = self.performers[role]
+		if camPos ~= nil and (p.rig.rootCF.Position - camPos).Magnitude > self.cullDistance then
+			p.culled = true -- uzak: güncelleme yok (CPU tasarrufu); yakına gelince update() zaman sıçramasını görüp yumuşakça yeniden senkronlar
+		else
+			p.culled = false
+			p:update(dt)
+		end
 	end
 end
 

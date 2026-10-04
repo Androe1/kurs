@@ -61,16 +61,10 @@ function Groove.prepare(self: any, perf: any, ctx: any, pose: any)
 		local t = b.time
 		local bd = P.bounceDelay
 		if P.bounce > 0 then
-			chain(perf, t, bd, function()
-				dyn.pelvisY:impulseForPeak(-P.bounce * str * style.bounceMul)
-			end)
+			perf:kick(t + bd, dyn.pelvisY, -P.bounce * str * style.bounceMul)
 		end
-		chain(perf, t, bd + 0.025, function()
-			dyn.waist.x:impulseForPeak(P.nod * 0.45 * str)
-		end)
-		chain(perf, t, bd + 0.05, function()
-			dyn.neck.x:impulseForPeak(P.nod * str * headAmp)
-		end)
+		perf:kick(t + bd + 0.025, dyn.waist.x, P.nod * 0.45 * str)
+		perf:kick(t + bd + 0.05, dyn.neck.x, P.nod * str * headAmp)
 		chain(perf, t, bd + 0.03, function()
 			dyn.shoulderL:impulseForPeak(Vector3.new(0, -0.05 * str, 0))
 			dyn.shoulderR:impulseForPeak(Vector3.new(0, -0.05 * str, 0))

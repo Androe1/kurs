@@ -36,22 +36,22 @@ local R15Rig = {}
 R15Rig.__index = R15Rig
 
 -- {eklem, Part0, Part1, çocuk eklem (kemik yönü için)}
-local DEF = {
+local DEF: { { string } } = {
 	{ "Root", "HumanoidRootPart", "LowerTorso", "Waist" },
 	{ "Waist", "LowerTorso", "UpperTorso", "Neck" },
-	{ "Neck", "UpperTorso", "Head", nil },
+	{ "Neck", "UpperTorso", "Head", "" },
 	{ "RightShoulder", "UpperTorso", "RightUpperArm", "RightElbow" },
 	{ "RightElbow", "RightUpperArm", "RightLowerArm", "RightWrist" },
-	{ "RightWrist", "RightLowerArm", "RightHand", nil },
+	{ "RightWrist", "RightLowerArm", "RightHand", "" },
 	{ "LeftShoulder", "UpperTorso", "LeftUpperArm", "LeftElbow" },
 	{ "LeftElbow", "LeftUpperArm", "LeftLowerArm", "LeftWrist" },
-	{ "LeftWrist", "LeftLowerArm", "LeftHand", nil },
+	{ "LeftWrist", "LeftLowerArm", "LeftHand", "" },
 	{ "RightHip", "LowerTorso", "RightUpperLeg", "RightKnee" },
 	{ "RightKnee", "RightUpperLeg", "RightLowerLeg", "RightAnkle" },
-	{ "RightAnkle", "RightLowerLeg", "RightFoot", nil },
+	{ "RightAnkle", "RightLowerLeg", "RightFoot", "" },
 	{ "LeftHip", "LowerTorso", "LeftUpperLeg", "LeftKnee" },
 	{ "LeftKnee", "LeftUpperLeg", "LeftLowerLeg", "LeftAnkle" },
-	{ "LeftAnkle", "LeftLowerLeg", "LeftFoot", nil },
+	{ "LeftAnkle", "LeftLowerLeg", "LeftFoot", "" },
 }
 
 R15Rig.JOINT_ORDER = {}
@@ -78,7 +78,7 @@ function R15Rig.new(model: Model): Rig
 		local m = motors[d[1]]
 		local childName = d[4]
 		local bone = Vector3.new(0, 0, 0)
-		if childName then
+		if childName ~= "" then
 			bone = m.C1:Inverse() * motors[childName].C0.Position
 		end
 		joints[d[1]] = {

@@ -20,7 +20,7 @@ export type Section = {
 	kind: string, intensity: number,
 }
 
-export type DrumEvent = { t: number, slot: number, kind: string, str: number, drum: string, hand: string?, fill: boolean? }
+export type DrumEvent = { t: number, slot: number, kind: string, str: number, drum: string, hand: string?, fill: boolean?, dropped: boolean?, hit: any? }
 export type StrumEvent = { t: number, slot: number, dir: number, str: number, kind: string }
 export type ChordEvent = { t: number, bar: number, pc: number, quality: string, fret: number, string: number }
 export type BassEvent = { t: number, slot: number, midi: number, str: number, string: number, fret: number, dur: number, finger: number }

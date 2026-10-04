@@ -35,14 +35,14 @@ def proj(p, view):
     p = np.array(p)
     return p @ r, p @ u
 
-def draw(ax, fr, view, center, span):
+def draw(ax, fr, view, center, span, color=None, first=True):
     j = dict(fr["j"])
     j["RightTip"] = fr["RightTip"]; j["LeftTip"] = fr["LeftTip"]
     for ch in CHAINS:
         pts = [j[n] for n in ch if n in j]
         xs, ys = zip(*[proj(p, view) for p in pts])
         side = "Right" if ch[1].startswith("Right") or (len(ch) > 1 and "Right" in ch[1]) else ("Left" if "Left" in ch[1] else None)
-        ax.plot(xs, ys, "-", lw=2.2, color=COL.get(side, "#444"))
+        ax.plot(xs, ys, "-", lw=2.2, color=color or COL.get(side, "#444"))
     # kafa
     hx, hy = proj(fr["head"], view)
     ax.add_patch(plt.Circle((hx, hy), 0.55, fill=False, color="#444", lw=1.5))
@@ -65,6 +65,18 @@ def draw(ax, fr, view, center, span):
     ax.set_xlim(center[0] - span, center[0] + span); ax.set_ylim(center[1] - span, center[1] + span)
     ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
 
+
+BAND_COL = {"Guitar": "#c0392b", "Bass": "#2471a3", "Drums": "#7d6608", "Vocal": "#1e8449"}
+
+def draw_band(ax, fr, view, span):
+    cxs = []
+    for role, p in fr["performers"].items():
+        q = dict(p); q["err"] = [0, 0]; q["reach"] = [0, 0]
+        draw(ax, q, view, (0, 0), 99, color=BAND_COL.get(role))
+        cxs.append(proj(p["j"]["Waist"], view))
+    cx = sum(c[0] for c in cxs) / len(cxs); cy = sum(c[1] for c in cxs) / len(cxs)
+    ax.set_xlim(cx - span, cx + span); ax.set_ylim(cy - span * 0.62, cy + span * 0.62 + 1.0)
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("log"); ap.add_argument("out")
@@ -73,6 +85,18 @@ def main():
     ap.add_argument("--span", type=float, default=4.0)
     a = ap.parse_args()
     frames = [json.loads(l[5:]) for l in open(a.log) if l.startswith("DUMP ")]
+    if frames and "performers" in frames[0]:
+        idx = [int(x) for x in a.frames.split(",")]
+        views = a.views.split(",")
+        fig, axs = plt.subplots(len(idx), len(views), figsize=(5.2 * len(views), 3.9 * len(idx)), squeeze=False)
+        for r, i in enumerate(idx):
+            fr = frames[min(i, len(frames) - 1)]
+            for c, v in enumerate(views):
+                draw_band(axs[r][c], fr, v, a.span)
+                axs[r][c].set_title(f"t={fr['t']:.2f}  {v}", fontsize=8)
+        plt.tight_layout(); plt.savefig(a.out, dpi=70)
+        print("kaydedildi", a.out, len(frames), "kare")
+        return
     idx = [int(x) for x in a.frames.split(",")]
     views = a.views.split(",")
     fig, axs = plt.subplots(len(idx), len(views), figsize=(3.6 * len(views), 3.6 * len(idx)), squeeze=False)

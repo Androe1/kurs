@@ -5,7 +5,7 @@
 	Hem animasyon (hedefler) hem PropBuilder (parçalar) aynı tabloyu kullanır -> el ile set hep hizalı.
 ]]
 
-local DrumKit = {}
+local DrumKit: any = {}
 
 export type Piece = {
 	name: string,
@@ -43,13 +43,13 @@ function DrumKit.layout(rig: any, stage: CFrame)
 	local lt = rig.joints.Root
 	local origin = stage * lt.c0 * Vector3.new(0, -seatDrop, 0)
 	local out = {}
-	for name, p in DrumKit.PIECES do
+	for name, p in pairs(DrumKit.PIECES :: { [string]: any }) do
 		local c = stage:VectorToWorldSpace(p.center * s) + origin
 		local n = stage:VectorToWorldSpace(Vector3.new(0, math.cos(p.tilt), math.sin(p.tilt)))
 		out[name] = { name = name, kind = p.kind, pos = c, normal = n, radius = p.radius * s, thickness = p.thickness * s, tilt = p.tilt }
 	end
 	local pedals = {}
-	for side, v in DrumKit.PEDALS do
+	for side, v in pairs(DrumKit.PEDALS :: { [string]: Vector3 }) do
 		pedals[side] = stage:VectorToWorldSpace(v * s) + origin
 	end
 	return { pieces = out, pedals = pedals, origin = origin, scale = s, seatDrop = seatDrop }
