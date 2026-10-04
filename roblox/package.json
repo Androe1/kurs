@@ -1,0 +1,7 @@
+{
+  "name": "band-performance-tests",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node tests/run.mjs" },
+  "devDependencies": { "@luau-rs/luau": "^0.739.0" }
+}
