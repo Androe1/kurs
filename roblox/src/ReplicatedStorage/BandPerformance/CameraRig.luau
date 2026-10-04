@@ -122,12 +122,23 @@ function CameraRig.new(): any
 end
 
 function CameraRig.target(self: any, band: any): (Vector3, Vector3)
-	local f = SHOTS[self.shot]
+	local f = SHOTS[self.shot] or SHOTS.front -- bilinmeyen plan adı çökertmesin
 	return f(band, self.role)
 end
 
+-- plan adını normalize et (büyük/küçük harf farkı); geçersizse nil
+function CameraRig.resolve(name: string): string?
+	local lower = string.lower(name)
+	for k in SHOTS do
+		if string.lower(k) == lower then
+			return k
+		end
+	end
+	return nil
+end
+
 function CameraRig.cut(self: any, shot: string, band: any, role: string?)
-	self.shot = shot
+	self.shot = CameraRig.resolve(shot) or "front"
 	self.role = role
 	local p, l = self:target(band)
 	self.pos:reset(p)
@@ -135,7 +146,7 @@ function CameraRig.cut(self: any, shot: string, band: any, role: string?)
 end
 
 function CameraRig.setShot(self: any, shot: string, role: string?)
-	self.shot = shot
+	self.shot = CameraRig.resolve(shot) or "front"
 	self.role = role
 end
 

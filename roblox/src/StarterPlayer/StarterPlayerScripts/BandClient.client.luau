@@ -74,7 +74,15 @@ local cameraRig = BandPerformance.CameraRig.new()
 local cameraMode: string? = nil
 local function applyCameraMode()
 	local mode = workspace:GetAttribute("BandCamera")
+	if mode == true then
+		mode = "auto" -- Boolean işaretlenmişse otomatik yönetmen
+	end
 	if type(mode) == "string" and mode ~= "" then
+		mode = string.lower(mode)
+		if mode ~= "auto" and BandPerformance.CameraRig.resolve(mode) == nil then
+			warn("[Band] Bilinmeyen BandCamera: '" .. mode .. "' -> auto kullanılıyor")
+			mode = "auto"
+		end
 		if mode ~= cameraMode then
 			cameraMode = mode
 			workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
