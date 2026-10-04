@@ -89,6 +89,15 @@ Prop'lar (gitar, bas, davul seti, mikrofon) prosedürel üretilir. Kendi modelin
 `BandSongId`, `BandLoop`, `BandLeadIn`, `BandDebug` (true: 5 sn'de bir temas hatası özeti), `BandCamera`
 (`auto` ya da `front, threeQuarterFront, side, threeQuarterBack, handsCloseUp, guitarSide, bassSide, drummerSide, lowAngle, elevated`).
 
+## Sessiz kayıt modu (telifli şarkıyı yüklemeden video)
+
+Şarkıyı Roblox'a yüklemene gerek yok. `BandSongId` boş bırak, `workspace` attribute'una `BandRecord = true` yaz:
+1. Play'e bas; 6 sn geri sayım (6..1) gelir, şarkı zamanı 0'da ekran **bir an beyaz flaşlar**.
+2. Ekran kaydını (OBS / Roblox Recorder) başlatıp animasyonu kaydet (şarkı 2:52, döngü kapalı).
+3. Video editöründe mp3'ü, sesteki ilk vuruşu videodaki beyaz flaşın karesine hizalayarak koy
+   (şarkıda ilk ölçü başı 0.39 sn, büyük giriş 6.4 sn'dedir: kolay hizalama noktası).
+Kamera için `BandCamera = auto` (müziğe göre otomatik kesme) ya da tek bir plan adı yaz.
+
 ## Animasyon felsefesi - istekler nerede karşılanıyor
 
 | İstek | Nerede |

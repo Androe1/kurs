@@ -6,7 +6,8 @@
 	Sunucu Motor6D yazmaz: Transform replike olmaz, her istemci animasyonu aynı saatten KENDİ üretir (BandClient).
 	Bu yüzden ağ trafiği yok, gecikme yok, herkes aynı karede aynı vuruşu görür.
 
-	Ayarlar (workspace attribute): BandLoop (bool, varsayılan true), BandLeadIn (sn, varsayılan 3), BandSongId (rbxassetid://...)
+	Ayarlar (workspace attribute): BandLoop (bool, varsayılan true), BandLeadIn (sn, varsayılan 3; BandRecord açıkken 6),
+	BandSongId (rbxassetid://...), BandRecord (bool: sessiz kayıt modu, geri sayım + flaş, döngü kapalı)
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -25,9 +26,13 @@ end
 if workspace:GetAttribute("BandLoop") == nil then
 	workspace:SetAttribute("BandLoop", true)
 end
+local recording = workspace:GetAttribute("BandRecord") == true
+if recording then
+	workspace:SetAttribute("BandLoop", false)
+end
 local leadIn = workspace:GetAttribute("BandLeadIn")
 if type(leadIn) ~= "number" then
-	leadIn = 3
+	leadIn = recording and 6 or 3
 end
 
 local function schedule()

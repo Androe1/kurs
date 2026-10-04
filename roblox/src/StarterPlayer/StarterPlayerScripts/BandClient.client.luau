@@ -88,11 +88,73 @@ local function applyCameraMode()
 	end
 end
 
+-- ── kayıt modu: sessiz çalış, geri sayım + senkron flaşı (video editöründe mp3'ü bu flaşa hizala)
+-- workspace attribute BandRecord = true  ->  ekranda 3-2-1 geri sayımı, şarkı zamanı 0'da tek karelik beyaz flaş
+local Players = game:GetService("Players")
+local gui: ScreenGui? = nil
+local label: TextLabel? = nil
+local flash: Frame? = nil
+local function ensureGui()
+	if gui then
+		return
+	end
+	local g = Instance.new("ScreenGui")
+	g.Name = "BandRecordOverlay"
+	g.IgnoreGuiInset = true
+	g.ResetOnSpawn = false
+	g.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+	local l = Instance.new("TextLabel")
+	l.Size = UDim2.fromScale(1, 0.3)
+	l.Position = UDim2.fromScale(0, 0.35)
+	l.BackgroundTransparency = 1
+	l.TextScaled = true
+	l.Font = Enum.Font.GothamBlack
+	l.TextColor3 = Color3.new(1, 1, 1)
+	l.TextStrokeTransparency = 0
+	l.Text = ""
+	l.Parent = g
+	local f = Instance.new("Frame")
+	f.Size = UDim2.fromScale(1, 1)
+	f.BackgroundColor3 = Color3.new(1, 1, 1)
+	f.BackgroundTransparency = 1
+	f.BorderSizePixel = 0
+	f.Parent = g
+	gui, label, flash = g, l, f
+end
+local lastFlashed = false
+local function updateRecordOverlay()
+	if not workspace:GetAttribute("BandRecord") then
+		if gui then
+			gui.Enabled = false
+		end
+		return
+	end
+	ensureGui()
+	;(gui :: ScreenGui).Enabled = true
+	local start = workspace:GetAttribute(Config.START_ATTRIBUTE)
+	local lbl, fl = label :: TextLabel, flash :: Frame
+	if type(start) ~= "number" then
+		lbl.Text = ""
+		return
+	end
+	local t = workspace:GetServerTimeNow() - start
+	if t < 0 then
+		lbl.Text = tostring(math.ceil(-t))
+		fl.BackgroundTransparency = 1
+		lastFlashed = false
+	else
+		lbl.Text = ""
+		-- şarkı zamanı 0..0.1 sn: beyaz flaş (sonra söner)
+		fl.BackgroundTransparency = (t < 0.1) and 0 or 1
+	end
+end
+
 local debugT = 0
 RunService:BindToRenderStep("BandPerformanceUpdate", Enum.RenderPriority.Camera.Value - 1, function(dt)
 	syncSound()
 	band:update(dt)
 	applyCameraMode()
+	updateRecordOverlay()
 	if cameraMode ~= nil then
 		if cameraMode == "auto" then
 			cameraRig:direct(band)
