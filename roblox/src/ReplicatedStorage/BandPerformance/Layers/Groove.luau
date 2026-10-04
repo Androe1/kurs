@@ -48,6 +48,8 @@ function Groove.prepare(self: any, perf: any, ctx: any, pose: any)
 	local dt = ctx.dt
 	local lim = Config.limits
 	local headAmp = style.headAmp
+	local calm = perf.calm:step(perf.calmTarget, dt)
+	g *= (1 - 0.55 * calm) -- sustain'de gövde sakinleşir
 
 	-- ── ritim: her vuruşta kinetik zincir
 	for _, b in ctx.beats do
@@ -60,7 +62,7 @@ function Groove.prepare(self: any, perf: any, ctx: any, pose: any)
 		local bd = P.bounceDelay
 		if P.bounce > 0 then
 			chain(perf, t, bd, function()
-				dyn.pelvisY:impulseForPeak(-P.bounce * str)
+				dyn.pelvisY:impulseForPeak(-P.bounce * str * style.bounceMul)
 			end)
 		end
 		chain(perf, t, bd + 0.025, function()
@@ -102,7 +104,7 @@ function Groove.prepare(self: any, perf: any, ctx: any, pose: any)
 			dyn.waist.z:impulseForPeak(change * D(1.2))
 		end
 	end
-	local amp = P.sway * (0.35 + 0.65 * g)
+	local amp = P.sway * (0.35 + 0.65 * g) * style.swayMul
 	-- stance değişimi (varyasyon: döngü 4, ilk ölçü): daha büyük kayma, ayak yeniden dengelenir
 	if style.stanceShift then
 		amp *= 1.45
@@ -115,7 +117,7 @@ function Groove.prepare(self: any, perf: any, ctx: any, pose: any)
 	local pr = dyn.pelvisRot:step(Vector3.new(P.lean * -0.15 * g, 0, rollTarget), dt)
 	-- göğüs: karşı rotasyon (pelvis roll'ın -c katı), yaylı -> gecikme + overshoot
 	local bias = perf.bias
-	local waistTarget = Vector3.new(P.lean * 0.4 * g + bias.waistPitch, bias.waistYaw, -pr.Z * P.chestCounter)
+	local waistTarget = Vector3.new(P.lean * 0.4 * g * style.leanMul + bias.waistPitch, bias.waistYaw, -pr.Z * P.chestCounter)
 	local w = dyn.waist:step(waistTarget, dt)
 	-- kafa: gövde sallanmasını dengeler (gözler yatay kalır), performans yönüne hafif önde gider
 	local neckTarget = Vector3.new(

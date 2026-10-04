@@ -13,6 +13,7 @@
 
 local Root = script:FindFirstAncestor("BandPerformance")
 local Rng = require(Root.Util.Rng)
+local DrumKit = require(Root.Performers.DrumKit)
 
 export type Section = {
 	index: number, startBar: number, endBar: number, startT: number, endT: number,
@@ -26,6 +27,7 @@ export type BassEvent = { t: number, slot: number, midi: number, str: number, st
 export type BarStyle = {
 	bar: number, cycle: number, phase: number, accentBoost: number, headAmp: number,
 	stanceShift: boolean, fill: boolean, hold: boolean, swayDir: number, vocalOn: boolean,
+	swayMul: number, bounceMul: number, leanMul: number,
 }
 
 export type Score = {
@@ -191,52 +193,59 @@ local function buildDrums(song: any, seed: number, sections: { Section }, slotDu
 		end
 		return a.kind < b.kind
 	end)
-	-- el ataması: sağ el = hat/ride, sol el = snare/crash; tom'lar tercih edilen elde (tom1 sol, tom2/floor sağ),
-	-- ardışık hızlı vuruşta aynı el kullanılmaz (insan eli ~7 Hz'i geçemez): fill'de eller dönüşümlü
-	local PREF = { snare = "Left", tom1 = "Left", tom2 = "Right", floor = "Right" }
-	local lastUse: { [string]: number } = { Left = -9, Right = -9 }
+	-- ── el ataması + FİZİKSEL UYGULANABİLİRLİK ──
+	-- Her el için iki vuruş arası en az  t_min = 0.07 + mesafe/hız  sn gerekir (kol hızı sınırlı). Hızlı fill'de eller
+	-- dönüşümlü kullanılır; hiçbir elin yetişemeyeceği vuruş atılır (insan zaten çalamaz) - öncelik: crash > tom/snare > ride > hat.
+	local ALLOWED = {
+		hat = { "Right" }, hatOpen = { "Right" }, ride = { "Right" }, crash = { "Left" },
+		snare = { "Left", "Right" }, tom1 = { "Left", "Right" }, tom2 = { "Right", "Left" }, floor = { "Right" },
+	}
+	local PRIO = { crash = 5, tom = 4, snare = 4, ride = 3, hatOpen = 3, hat = 2 }
+	local function drumPos(e: DrumEvent): Vector3
+		local name = e.drum == "hatOpen" and "hat" or e.drum
+		return DrumKit.PIECES[name].center
+	end
+	local HAND_SPEED = 7.5 -- stud/sn (referans birim: kit ölçeği)
+	local out: { DrumEvent } = {}
+	local last: { [string]: { e: DrumEvent, idx: number }? } = { Left = nil, Right = nil }
 	for _, e in ev do
-		if e.kind == "hat" or e.kind == "hatOpen" or e.kind == "ride" then
-			e.hand = "Right"
-		elseif e.kind == "crash" then
-			e.hand = "Left"
-		elseif e.kind == "snare" or e.kind == "tom" then
-			local pref = PREF[e.drum] or "Left"
-			local other = pref == "Left" and "Right" or "Left"
-			if e.t - lastUse[pref] < 0.16 and e.t - lastUse[other] >= 0.16 and e.drum ~= "floor" then
-				e.hand = other
-			elseif e.t - lastUse[pref] < 0.16 and e.drum == "floor" then
-				e.hand = pref -- yer tomu yalnızca sağ elle erişilir
-			else
-				e.hand = pref
+		if e.drum == "kick" then
+			table.insert(out, e)
+		else
+			local cand = ALLOWED[e.drum] or { "Left" }
+			local best, bestShort = nil, 1e9
+			for _, h in cand do
+				local l = last[h]
+				local short = 0
+				if l then
+					local need = 0.07 + (drumPos(l.e) - drumPos(e)).Magnitude / HAND_SPEED
+					short = math.max(0, need - (e.t - l.e.t))
+				end
+				if short < bestShort - 1e-9 then
+					best, bestShort = h, short
+				end
 			end
-		end
-		if e.hand then
-			lastUse[e.hand] = e.t
+			if bestShort <= 0.02 then
+				e.hand = best
+				table.insert(out, e)
+				last[best] = { e = e, idx = #out }
+			else
+				-- yetişemiyor: daha öncelikli ise öncekini at, değilse bunu at
+				local l = last[best]
+				if l and (PRIO[e.kind] or 0) > (PRIO[l.e.kind] or 0) then
+					l.e.hand = nil
+					l.e.dropped = true
+					e.hand = best
+					table.insert(out, e)
+					last[best] = { e = e, idx = #out }
+				end
+			end
 		end
 	end
-	-- aynı el için çok yakın iki vuruşta (insan eli ~7 Hz'den hızlı vuramaz) düşük öncelikliyi at
-	local PRIO = { crash = 5, tom = 4, snare = 4, ride = 3, hatOpen = 3, hat = 2, kick = 9 }
-	local lastByHand: { [string]: DrumEvent } = {}
 	local keep: { DrumEvent } = {}
-	for _, e in ev do
-		if e.hand == nil then
-			table.insert(keep, e) -- kick: el yok
-		else
-			local prev = lastByHand[e.hand]
-			if prev and e.t - prev.t < 0.085 then
-				if (PRIO[e.kind] or 0) > (PRIO[prev.kind] or 0) then
-					local idx = table.find(keep, prev)
-					if idx then
-						table.remove(keep, idx)
-					end
-					table.insert(keep, e)
-					lastByHand[e.hand] = e
-				end
-			else
-				table.insert(keep, e)
-				lastByHand[e.hand] = e
-			end
+	for _, e in out do
+		if not e.dropped then
+			table.insert(keep, e)
 		end
 	end
 	return keep
@@ -437,10 +446,22 @@ local function buildBarStyles(song: any, seed: number, sections: { Section }): {
 		elseif kind == "chorus" then
 			vocalOn = true
 		end
+		-- Aynı 4 ölçülük riff her tekrarlandığında kontrollü varyasyon (rastgele değil, döngü numarasına bağlı):
+		--   döngü 1: normal sallanma | döngü 2: daha güçlü vurgular, daha çok çökme | döngü 3: kafa hareketi öne çıkar
+		--   döngü 4: duruş değişimi (ağırlık, geniş sallanma). Küçük bir (%±8) deterministik oynama tekrarı kırar.
+		local jitter = 0.92 + 0.16 * Rng.hash(seed, math.floor(bar / 4), 9)
+		local SWAY = { 1.0, 1.1, 0.9, 1.5 }
+		local BOUNCE = { 1.0, 1.3, 1.0, 0.9 }
+		local LEAN = { 1.0, 1.25, 0.75, 1.1 }
+		local HEAD = { 1.0, 1.0, 1.6, 1.2 }
+		local ACCENT = { 1.0, 1.3, 1.0, 1.1 }
 		table.insert(out, {
 			bar = bar, cycle = cycle, phase = phase,
-			accentBoost = cycle == 1 and 1.25 or 1.0, -- döngü 2: daha güçlü vurgular
-			headAmp = cycle == 2 and 1.5 or 1.0, -- döngü 3: daha fazla kafa hareketi
+			accentBoost = ACCENT[cycle + 1] * jitter,
+			headAmp = HEAD[cycle + 1] * jitter,
+			swayMul = SWAY[cycle + 1] * jitter,
+			bounceMul = BOUNCE[cycle + 1] * jitter,
+			leanMul = LEAN[cycle + 1],
 			stanceShift = cycle == 3 and phase == 0, -- döngü 4: duruş değişimi
 			fill = sectionLast or (phase == 3 and cycle == 3),
 			hold = phase == 3 and Rng.chance(seed, bar, 3, 0.35), -- pose hold: son vuruş sonrası kısa donuk poz

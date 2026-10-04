@@ -131,6 +131,15 @@ function Stringed.prepare(self: any, perf: any, ctx: any, pose: any)
 	local lookDown = math.clamp((self.fretSpeed - 1.2) / 5, 0, 1)
 	pose.gaze += Vector3.new(D(11) * lookDown * ctx.playW, -D(5) * lookDown * ctx.playW, 0)
 
+	-- ── sustain: son nota/boşluktan beri uzun süre vuruş yoksa (bas) gövde ve el sakinleşir
+	if isBass then
+		local e = score.bass[math.max(Score.firstIndexAtOrAfter(score.bass, now + 1e-9) - 1, 1)]
+		local since = e and (now - e.t) or 0
+		perf.calmTarget = (since > 0.42) and 1 or 0
+	else
+		perf.calmTarget = 0
+	end
+
 	-- ── vuruş olayları
 	if isBass then
 		self:_basePluckEvents(perf, ctx)

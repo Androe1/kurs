@@ -42,7 +42,7 @@ const mockRbx = fs.readFileSync(path.join(here, 'mock', 'Rbx.luau'), 'utf8');
 const testFiles = fs.readdirSync(here).filter((f) => f.endsWith('.test.luau')).sort()
   .filter((f) => only.length === 0 || only.some((o) => f.startsWith(o)));
 
-const envPairs = Object.entries(process.env).filter(([k]) => /^(ROLE|T0|T1|STEP|SEED|SCENE)$/.test(k)).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ');
+const envPairs = Object.entries(process.env).filter(([k]) => /^(ROLE|T0|T1|STEP|SEED|SCENE|HE|THR|JOINT)$/.test(k)).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ');
 const lineMap = [];
 let bundle = '';
 function emit(text, label) {

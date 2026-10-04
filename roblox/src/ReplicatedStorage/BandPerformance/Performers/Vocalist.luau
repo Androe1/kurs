@@ -27,15 +27,22 @@ local Vocalist = {}
 local Layer = {}
 Layer.__index = Layer
 
--- UpperTorso uzayında sol el jest hedefleri (referans erişim 2.2): konum + el yönelimi (euler, rad)
+-- UpperTorso uzayında sol el jest hedefleri: konum + parmak yönü (f) + avuç içi normali (n); X sağ, Y yukarı, Z GERİ (ileri = -Z)
 local GESTURES = {
-	rest = { pos = Vector3.new(-1.0, -0.75, -0.45), rot = Vector3.new(0, 0, 0), w = 0.35 },
-	chest = { pos = Vector3.new(-0.30, 0.05, -0.78), rot = Vector3.new(D(-70), 0, D(-30)), w = 1 },
-	reach = { pos = Vector3.new(-1.25, 0.55, -1.45), rot = Vector3.new(D(-85), 0, D(20)), w = 1 },
-	pumpUp = { pos = Vector3.new(-0.85, 1.25, -0.95), rot = Vector3.new(D(-40), 0, D(-20)), w = 1 },
-	pumpDown = { pos = Vector3.new(-0.95, 0.15, -0.95), rot = Vector3.new(D(-40), 0, D(-20)), w = 1 },
-	open = { pos = Vector3.new(-1.45, 0.25, -0.85), rot = Vector3.new(D(-60), 0, D(60)), w = 1 },
+	rest = { pos = Vector3.new(-1.0, -0.75, -0.45), f = Vector3.new(0, -0.9, -0.3), n = Vector3.new(1, 0, 0), w = 0.35 },
+	chest = { pos = Vector3.new(-0.30, 0.05, -0.78), f = Vector3.new(0.6, 0.7, -0.2), n = Vector3.new(0, 0, 1), w = 1 },
+	reach = { pos = Vector3.new(-1.25, 0.55, -1.45), f = Vector3.new(-0.35, 0.1, -0.93), n = Vector3.new(0, 1, 0), w = 1 },
+	pumpUp = { pos = Vector3.new(-0.85, 1.25, -0.95), f = Vector3.new(0, 0.9, -0.4), n = Vector3.new(1, 0, 0.2), w = 1 },
+	pumpDown = { pos = Vector3.new(-0.95, 0.15, -0.95), f = Vector3.new(0, 0.9, -0.4), n = Vector3.new(1, 0, 0.2), w = 1 },
+	open = { pos = Vector3.new(-1.45, 0.25, -0.85), f = Vector3.new(-0.8, 0.2, -0.5), n = Vector3.new(0.2, 1, 0), w = 1 },
 }
+
+-- jest -> UpperTorso uzayında sol el yönelimi (CFrame, dönüş): parmaklar = el -Y, avuç içi = el +X (sol el)
+local function gestureRot(g: any): CFrame
+	local f = g.f.Unit
+	local n = (g.n - f * g.n:Dot(f)).Unit
+	return CFrame.fromMatrix(Vector3.zero, n, -f, n:Cross(-f))
+end
 
 function Layer.new(perf: any)
 	local s = perf.rig.lengths.reach / 2.2
@@ -47,7 +54,10 @@ function Layer.new(perf: any)
 		lastGestureBar = -1,
 		gestPos = Spring3.new(GESTURES.rest.pos * s, 4.2, 0.5),
 		gestW = Spring.new(0.35, 3, 1),
-		gestRot = Spring3.new(Vector3.zero, 4.5, 0.6),
+		rotFrom = gestureRot(GESTURES.rest), -- yönelim geçişi: önceki (anlık) yönelim -> yeni jest yönelimi
+		rotTo = gestureRot(GESTURES.rest),
+		rotCur = gestureRot(GESTURES.rest),
+		gestBlend = Spring.new(1, 2.8, 0.7), -- 0 = önceki yönelim, 1 = yeni (aşmalı)
 		lastPhraseState = false,
 		micWorld = Vector3.zero,
 		mouthLook = Spring.new(0, 3, 0.7),
@@ -115,7 +125,10 @@ function Layer.prepare(self: any, perf: any, ctx: any, pose: any)
 		local g = GESTURES[self.gesture]
 		-- hedef değişimi: önce küçük anticipation (zıt yönde), sonra hedef
 		self.gestPos.y:impulseForPeak(0.05 * s)
-		self.gestRot:impulseForPeak(Vector3.new(0, 0, 0.12))
+		self.rotFrom = self.rotCur -- anlık yönelimden başla: aşmalı geçişte bile sıçrama yok
+		self.rotTo = gestureRot(g)
+		self.gestBlend.x = 0
+		self.gestBlend.v = 0
 	end
 	local g = GESTURES[self.gesture]
 	-- nakaratta ölçü başı vuruşunda yumruk (pump) darbesi
@@ -129,7 +142,7 @@ function Layer.prepare(self: any, perf: any, ctx: any, pose: any)
 	end
 	self.gestPos:step(g.pos * s, dt)
 	self.gestW:step(g.w, dt)
-	self.gestRot:step(g.rot, dt)
+	self.gestBlend:step(1, dt)
 
 	-- kafa: nakaratta enerjik frazda geriye (yüksek nota), fraz arası öne rahat
 	local singing = self.micUp.x
@@ -175,9 +188,9 @@ function Layer.contact(self: any, perf: any, ctx: any, pose: any)
 
 	-- sol el: jest
 	local gp = self.gestPos:get()
-	local gr = self.gestRot:get()
 	local wpos = ut * gp
-	local rot = ut.Rotation * CFrame.Angles(gr.X, gr.Y, gr.Z)
+	self.rotCur = self.rotFrom:Lerp(self.rotTo, math.clamp(self.gestBlend.x, 0, 1.2))
+	local rot = ut.Rotation * self.rotCur
 	pose:setHand("Left", {
 		cf = CFrame.new(wpos) * rot,
 		grip = CFrame.new(0, -0.2 * s, 0),

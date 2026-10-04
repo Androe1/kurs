@@ -17,6 +17,7 @@ local Root = script:FindFirstAncestor("BandPerformance")
 local Config = require(Root.Config)
 local SpringM = require(Root.Util.Spring)
 local Score = require(Root.Music.Score)
+local Ease = require(Root.Util.Ease)
 local Pose = require(Root.Layers.Pose)
 local Interaction = require(Root.Layers.Interaction)
 local PerformerState = require(Root.Performers.PerformerState)
@@ -56,6 +57,8 @@ function Performer.new(rig: any, role: string, opts: { score: any, clock: any, s
 		lastT = -1,
 		beatCursor = -1,
 		props = {} :: { any },
+		calm = Spring.new(0, 2.0, 1.0), -- 0..1: sustain/boşluk sırasında hareketi kıs (enstrüman katmanları besler)
+		calmTarget = 0,
 		bias = { waistPitch = 0, waistYaw = 0, neckYaw = 0 }, -- enstrüman katmanlarının gövdeye verdiği yönelim eğilimi
 		seated = false,
 		metrics = { reach = {} :: { [string]: number }, handError = { Left = 0, Right = 0 } },
@@ -136,6 +139,11 @@ function Performer.peek(self: any, list: { any }, now: number, window: number): 
 end
 
 function Performer.resync(self: any, now: number)
+	-- seek/atlama: zaman süreksizdir ama poz süreksiz olmasın -> önceki pozdan ~0.35 sn'de yumuşakça geç
+	if self.lastTr then
+		self.blendFrom = self.lastTr
+		self.blendT = 0
+	end
 	self.queue = {}
 	self.cursors = {}
 	self.beatCursor = -1
@@ -216,6 +224,19 @@ function Performer.update(self: any, dt: number)
 	end
 	-- Etkileşim (IK + FK karışımı)
 	Interaction.solve(self, pose, tr, parts, dt)
+	if self.blendFrom then
+		self.blendT += dt / 0.35
+		local w = Ease.smootherstep(self.blendT)
+		for name, cf in tr do
+			local from = self.blendFrom[name]
+			if from then
+				tr[name] = from:Lerp(cf, w)
+			end
+		end
+		if self.blendT >= 1 then
+			self.blendFrom = nil
+		end
+	end
 	rig:apply(tr)
 	local finalParts = rig:forward(tr)
 	self.parts = finalParts
@@ -224,7 +245,7 @@ function Performer.update(self: any, dt: number)
 	-- temas hatası ölçümü
 	for _, side in { "Right", "Left" } do
 		local h = (pose.hands :: any)[side]
-		if h and h.w > 0.98 then
+		if h and h.w > 0.98 and self.ikSpring[side].x > 0.97 then
 			local handCF = finalParts[side .. "Hand"]
 			self.metrics.handError[side] = ((handCF * h.grip).Position - h.cf.Position).Magnitude
 		else

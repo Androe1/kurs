@@ -134,16 +134,17 @@ function DrumLayer.sampleHand(self: any, side: string, now: number)
 		T = b.t - a.t
 		tRel = now - a.t
 	elseif b then
-		T = math.max(b.t - (now - 1e-3), 0.3)
-		T = math.max(b.t - (b.t - 0.6), 0.6)
+		-- ilk vuruştan önce: el dinlenme noktasında, vuruştan 0.6 sn önce hazırlık yayına başlar
+		T = 0.6
 		tRel = now - (b.t - T)
 		tipA = restTip
 	elseif a then
-		T = 1.2
+		-- son vuruştan sonra: geri tepme ile kalkar ve el havada bekler (hiçbir zaman ani düşüş yok)
+		T = 1e9
 		tRel = now - a.t
 		tipB = restTip
 	else
-		T, tRel = 1, 0
+		T, tRel = 1e9, 0
 	end
 	-- genlik: iki vuruş arası süre ve sonraki vuruşun gücü; büyük vuruşa hazırlık (anticipation) daha yüksek kalkar
 	local strB = b and b.str or 0.4
@@ -162,12 +163,12 @@ function DrumLayer.sampleHand(self: any, side: string, now: number)
 	local riseT = math.min(0.30, 0.40 * T)
 	local fallT = math.min(0.26, 0.52 * T)
 	if not b then
-		riseT = math.min(0.35, T)
+		riseT = 0.35
 		fallT = 0
 	end
 	local h = arc(tRel, T, A, riseT, fallT)
 	-- yatay ilerleme: yükseliş + bekleme sırasında hedefe varır, düşüşte sabit
-	local travelT = math.max(T - fallT, 1e-3)
+	local travelT = (T >= 1e8) and 0.6 or math.max(T - fallT, 1e-3)
 	local p = Ease.smootherstep(tRel / travelT)
 	local base = tipA:Lerp(tipB, p)
 	-- yüzey yüksekliği iki davul arasında yumuşak; ucun yüzeyden en az 0 yukarıda kalması h>=0 ile garanti
