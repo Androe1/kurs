@@ -205,7 +205,13 @@ class Flag:
         self.plate = stamp_text(remove_letters(im, rng), text, rng)
         self.static, self.fp, self.a, chroma = separate(self.plate)
         h, w = self.h, self.w
+        lum = channels(self.plate)[1]
+        inside = ndi.binary_fill_holes(ndi.binary_closing(chroma > 30, iterations=3))   # kirmizi govde + harfler
+        inside = cv2.GaussianBlur(ndi.binary_erosion(inside, iterations=2).astype(np.float32), (0, 0), 2)
+        ink = cv2.GaussianBlur(smooth(lum, 30, 12) * smooth(chroma, 40, 15), (0, 0), 0.8) * self.a
+        ink *= 0.12 + 0.88 * inside                                  # siyah kenarlarda cok hafif
         self.tex = np.concatenate([self.fp, self.a[..., None] * 255], -1)
+        self.ink = ink.astype(np.float32)                          # harf maskesi (parlama icin)
         yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
         self.X, self.Y = xx, yy
         hx = hoist_x(yy)
@@ -216,34 +222,40 @@ class Flag:
         self.loose = cv2.GaussianBlur(1 - smooth(body, 0.05, 0.6), (0, 0), 10)
 
     def field(self, ph):
+        """dx, dy: piksel kaydirma; z: kumasin ekrana dik yuksekligi (isik icin)."""
         tau = 2 * math.pi
         u, v = self.u, self.v
-        amp = smooth(u, 0.0, 0.35) * u ** 0.9
+        # yazinin oldugu orta kisim da belirgin dalgalansin diye genlik erken yukselir
+        amp = smooth(u, 0.0, 0.25) * (0.45 + 0.55 * u)
         p1 = tau * (1.10 * u + 0.18 * v - 3 * ph)
-        p2 = tau * (2.05 * u - 0.35 * v - 5 * ph + 0.37)
-        p3 = tau * (3.60 * u + 0.60 * v - 8 * ph + 0.81)
-        dy = amp * (17 * np.sin(p1) + 7 * np.sin(p2) + 2.5 * np.sin(p3))
-        dx = amp * (-9 * np.cos(p1) - 3.5 * np.cos(p2))
+        p2 = tau * (1.60 * u - 0.90 * v - 5 * ph + 0.37)          # capraz kivrimlar
+        p3 = tau * (2.80 * u + 1.40 * v - 8 * ph + 0.81)
+        z = amp * (22 * np.sin(p1) + 10 * np.sin(p2) + 4 * np.sin(p3))
+        dy = 0.95 * z
+        dx = amp * (-9 * np.cos(p1) - 5 * np.cos(p2) - 1.5 * np.cos(p3))
         # yirtik uclarin cirpintisi
         q1 = tau * (5.0 * u + 2.3 * v - 9 * ph)
         q2 = tau * (7.5 * u - 3.1 * v - 11 * ph + 0.5)
         fl = self.loose * smooth(u, 0.05, 0.4)
         dy += fl * (6 * np.sin(q1) + 3 * np.sin(q2))
         dx += fl * (4 * np.cos(q1 + 0.7))
-        # isik: dalganin egimi (kumasin isiga donen/uzaklasan yuzleri)
-        slope = amp * (17 * 1.10 * np.cos(p1) + 7 * 2.05 * np.cos(p2) + 2.5 * 3.6 * np.cos(p3))
-        return dx.astype(np.float32), dy.astype(np.float32), slope
+        return dx.astype(np.float32), dy.astype(np.float32), z.astype(np.float32)
 
     def frame(self, ph):
-        dx, dy, slope = self.field(ph)
-        mx = self.X - dx
-        my = self.Y - dy
+        dx, dy, z = self.field(ph)
+        mx, my = self.X - dx, self.Y - dy
         s = cv2.remap(self.tex, mx, my, cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        a = np.clip(s[..., 3:] / 255, 0, 1)
+        a = np.clip(s[..., 3:4] / 255, 0, 1)
+        ink = np.clip(cv2.remap(self.ink, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT,
+                                borderValue=0), 0, 1)[..., None] * a
         rgb = np.clip(s[..., :3], 0, None)
-        k = np.clip(slope / 45.0, -1, 1)[..., None]
-        shade = 1 + 0.30 * k + 0.12 * np.clip(k, 0, 1) ** 2
-        rgb = rgb * shade
+        # isik sol-ustten: kivrimin isiga bakan yuzu parlar, arkasi kararir
+        gy, gx = np.gradient(z)
+        k = np.clip(-(0.75 * gx + 0.66 * gy) * 6.5, -1, 1)[..., None]
+        lit = np.clip(k, 0, 1)
+        rgb = rgb * (1 + 0.38 * k) + a * lit ** 2 * np.array([16, 5, 7], np.float32)
+        # siyah harfler carpimla aydinlanmaz: uzerlerinde gezen kumas parlamasi
+        rgb += ink * lit ** 1.5 * np.array([62, 40, 44], np.float32)
         out = self.static * (1 - a) + rgb
         return np.clip(out + 0.5, 0, 255).astype(np.uint8)
 
