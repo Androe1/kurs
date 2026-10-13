@@ -7,8 +7,7 @@ from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.boundsPen import BoundsPen
 
 FONTS = Path(__file__).resolve().parent.parent / "fonts"
-OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parent / "konseptler"
-OUT.mkdir(parents=True, exist_ok=True)
+OUT = Path(__file__).resolve().parent / "konseptler"
 BLACK = TTFont(FONTS / "Montserrat-Black.ttf")
 SEMI = TTFont(FONTS / "Montserrat-SemiBold.ttf")
 
@@ -169,12 +168,16 @@ def concept_c_full():
     return W, H, f'<path fill-rule="evenodd" d="{body}{notches}{d1}{d2}"/>'
 
 
-write_set("a-blok", "Androe Studio A - Yerleşen Blok", concept_a())
-write_set("b-zirve", "Androe Studio B - Zirve", concept_b())
-sym_c = concept_c_symbol()
-save("c-kartus-sembol.svg", 256, 256, sym_c, "Androe Studio C - Kartuş sembol")
-W, H, emb = concept_c_full()
-save("c-kartus-lockup.svg", W, H, emb, "Androe Studio C - Kartuş amblem")
-wm, h = wordmark_block(0, 0, 600)
-save("c-kartus-yazi.svg", 600, round(h, 2), wm, "Androe Studio C - yazılı logo")
-print("ok")
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        OUT = Path(sys.argv[1])
+    OUT.mkdir(parents=True, exist_ok=True)
+    write_set("a-blok", "Androe Studio A - Yerleşen Blok", concept_a())
+    write_set("b-zirve", "Androe Studio B - Zirve", concept_b())
+    sym_c = concept_c_symbol()
+    save("c-kartus-sembol.svg", 256, 256, sym_c, "Androe Studio C - Kartuş sembol")
+    W, H, emb = concept_c_full()
+    save("c-kartus-lockup.svg", W, H, emb, "Androe Studio C - Kartuş amblem")
+    wm, h = wordmark_block(0, 0, 600)
+    save("c-kartus-yazi.svg", 600, round(h, 2), wm, "Androe Studio C - yazılı logo")
+    print("ok")
