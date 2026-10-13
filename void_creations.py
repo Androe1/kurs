@@ -4,6 +4,7 @@ Kullanım:
     pip install -r requirements.txt
     python void_creations.py                  # output/void_creations_intro.mp4
     python void_creations.py --still 1.3      # yalnızca 1.3. saniyedeki kareyi PNG kaydet
+    python void_creations.py --dikey          # 9:16 (1080x1920): output/void_creations_intro_9x16.mp4
 """
 import argparse
 import tempfile
@@ -12,23 +13,30 @@ from pathlib import Path
 
 from intro import encode, save_png
 from sound import write_wav
+import void_scene
 from void_scene import VoidScene
 from void_sound import synthesize
 
 
 def main():
     parser = argparse.ArgumentParser(description="Void Creations intro videosunu üretir.")
-    parser.add_argument("-o", "--output", default="output/void_creations_intro.mp4")
-    parser.add_argument("--width", type=int, default=1920)
-    parser.add_argument("--height", type=int, default=1080)
+    parser.add_argument("-o", "--output")
+    parser.add_argument("--width", type=int)
+    parser.add_argument("--height", type=int)
+    parser.add_argument("--dikey", action="store_true", help="9:16 dikey video (1080x1920)")
     parser.add_argument("--fps", type=int, default=60)
     parser.add_argument("--still", type=float, metavar="SANIYE",
                         help="video yerine yalnızca bu andaki kareyi PNG olarak kaydet")
     args = parser.parse_args()
+    if args.dikey:
+        void_scene.use_vertical()
+    width = args.width or (1080 if args.dikey else 1920)
+    height = args.height or (1920 if args.dikey else 1080)
+    output = args.output or ("output/void_creations_intro_9x16.mp4" if args.dikey else "output/void_creations_intro.mp4")
 
-    out = Path(args.output)
+    out = Path(output)
     out.parent.mkdir(parents=True, exist_ok=True)
-    scene = VoidScene(args.width, args.height, args.fps)
+    scene = VoidScene(width, height, args.fps)
 
     if args.still is not None:
         path = out.with_name(f"void_kare_{args.still:.2f}.png")

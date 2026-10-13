@@ -133,7 +133,8 @@ Linux'ta sunucuda çalıştırmak için `libegl1` gerekir (ekran kartı gerekmez
 # Void Creations - Intro (4.4 saniye)
 
 Hazır video: [`output/void_creations_intro.mp4`](output/void_creations_intro.mp4)
-(1920x1080, 60 fps, H.264 + AAC stereo). Referans videonun ilk 4 saniyesindeki animasyon akışı;
+(1920x1080, 60 fps, H.264 + AAC stereo); 9:16 dikey sürümü
+[`output/void_creations_intro_9x16.mp4`](output/void_creations_intro_9x16.mp4) (1080x1920, aynı animasyon ve ses). Referans videonun ilk 4 saniyesindeki animasyon akışı;
 ekranda logo ve yazıdan başka hiçbir şey yok. V logosu VOID'in V'sidir: **[V]OID CREATIONS**.
 Yazı, orijinal yazı görselinin birebir aynısıdır (harfler, aralıklar, logonun yeri) ve parlamasızdır
 (keskin beyaz). Arka plan referansla aynı temada ama özgündür: referanstaki öğelerin hiçbiri kullanılmadı.
@@ -151,6 +152,7 @@ Yazı, orijinal yazı görselinin birebir aynısıdır (harfler, aralıklar, log
 ```bash
 python void_creations.py                 # output/void_creations_intro.mp4
 python void_creations.py --still 1.3     # tek kareyi PNG kaydet
+python void_creations.py --dikey         # 9:16: output/void_creations_intro_9x16.mp4
 ```
 
 - `void_creations.py` - videoyu üretir

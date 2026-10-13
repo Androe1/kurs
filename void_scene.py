@@ -105,6 +105,7 @@ N_POLY = ((10.0708, -1.0), (10.0708, 0.0), (10.3411, 0.0), (10.3411, -0.5354), (
 # logonun dilinden türetildi: 18.3° eğimli V şevronları ve şerit grupları, zemin ızgarası,
 # nokta matrisleri, cetveller, köşe işaretleri ve kesikli kılavuz çizgileri.
 GRID_STEP, GRID_EXTENT = 160.0, (1440.0, 1120.0)   # ızgara aralığı, düzlemin yarı genişliği/yüksekliği
+BG_SHIFT_Y = 0.0         # zemin düzleminin ekrandaki dikey kayması (dikey düzende yukarı)
 CHEVRONS = (  # V şevron konturları: (u, v, yükseklik, dönüş derece, kesikli mi, parlaklık)
     (0, 40, 980, 0, True, 0.10), (-860, -470, 360, -10, False, 0.17),
     (800, 500, 470, 180, False, 0.14), (1010, -560, 230, 6, True, 0.16),
@@ -254,6 +255,17 @@ def upsample2(a):
     return along(along(a, 0), 1)
 
 
+def use_vertical():
+    """9:16 dikey düzen: tasarım alanı 1080x1920; yazı ekrana sığsın diye büyük harf
+    yüksekliği küçülür, zemin düzlemi dikeyde de ekranı kaplayacak kadar uzar."""
+    global W, H, CX, CY, CAP, GRID_EXTENT, BG_SHIFT_Y
+    W, H = 1080, 1920
+    CX, CY = W / 2, H / 2
+    CAP = 76.0                                   # kilit genişliği ~ 900 px (yanlarda ~90 px boşluk)
+    GRID_EXTENT = (1440.0, 1760.0)
+    BG_SHIFT_Y = -330.0
+
+
 # ---------------------------------------------------------------- zemin
 
 class Backdrop:
@@ -334,7 +346,7 @@ class Backdrop:
         spin = math.radians(lerp(lerp(-5, 1, d), 18, u))
         roll = math.radians(lerp(lerp(-3, 1.5, d), -8, u))
         rot = rot_z(roll) @ rot_x(tilt) @ rot_z(spin)
-        offset = np.array([lerp(lerp(30, -25, d), -80, u), lerp(10, -10, d), lerp(lerp(260, 200, d), -60, u)])
+        offset = np.array([lerp(lerp(30, -25, d), -80, u), lerp(10, -10, d) + BG_SHIFT_Y, lerp(lerp(260, 200, d), -60, u)])
         return rot, offset, roll
 
     @staticmethod
