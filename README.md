@@ -127,3 +127,30 @@ python glitch_intro.py --still 4.6      # tek kareyi PNG kaydet
 - `output/taslak/` - onay için storyboard, hareket önizlemesi ve referansla senkron karşılaştırma
 
 Linux'ta sunucuda çalıştırmak için `libegl1` gerekir (ekran kartı gerekmez, llvmpipe ile çalışır).
+
+---
+
+# Androe Studio - Yeni İşaret Intro'su (5,6 saniye)
+
+Hazır video: [`output/androe_isaret_intro.mp4`](output/androe_isaret_intro.mp4)
+(1920x1080, 60 fps, H.264 + AAC stereo). Yalnızca yeni işareti (`logo/final/isaret.svg`)
+ve ANDROE STUDIO yazısını kullanır; karakter yok.
+
+| Saniye      | Görüntü                                                                 | Ses                          |
+|-------------|-------------------------------------------------------------------------|------------------------------|
+| 0.25 - 0.78 | Karanlıkta ortada ince bir ışık çizgisi uzar                            | yükselen gerilim             |
+| 0.78 - 1.40 | İşaret o çizgiden göz açılır gibi dikey açılır, lavanta ışıktan mora döner | derin vuruş + çan          |
+| 0.95 - 1.75 | İşaretten dışa doğru ince bir ışık halkası yayılır                      |                              |
+| 1.60 - 2.20 | İşaretin üzerinden çapraz bir parlama geçer                             | ışıltı                       |
+| 2.30 - 3.05 | İşaret küçülüp sola kayar, ANDROE STUDIO arkasından harf harf çıkar     | whoosh + her harfe nota      |
+| 3.05 - 4.90 | Logo durur, hafifçe nefes alır                                          | çan, ışıltı, sıcak akor      |
+| 4.90 - 5.60 | Yumuşakça kararır                                                       | ses söner                    |
+
+```bash
+python isaret_intro.py                     # output/androe_isaret_intro.mp4
+python isaret_intro.py --still 3.5         # tek kareyi PNG kaydet
+python isaret_intro.py --width 3840 --height 2160 -o output/androe_isaret_intro_4k.mp4
+```
+
+Zamanlama `isaret_intro.py` başındaki `T_*` sabitlerinde, boyutlar `MARK_BIG` / `MARK_SMALL`'da.
+Ses `sound.py`'deki efektleri yeniden kullanır.
