@@ -51,7 +51,8 @@ SHOTS = {  # ad: (ilk kare, son kare, sahnenin dünya ofseti)
 # file: assets/models altındaki klasör (Poly Haven, CC0; assets/fetch_polyhaven.py indirir)
 # only: yalnızca adı bu ekle biten parçalar; lid: kapağı arka menteşeden açılacak parça.
 ASSET_SPECS = {
-    "rifle": {"length": 1.08, "file": "polyhaven/bolt_action_rifle_7_62"},
+    "rifle": {"length": 0.84},
+    "rifle_fde": {"length": 0.84},  # çöl rengi (FDE) dipçik/kabza  # M4A1 (prosedürel; assets/models/rifle.glb konursa o kullanılır)
     "crate": {"length": 1.25, "file": "polyhaven/wooden_military_crate"},
     "crate_open": {"length": 1.25, "file": "polyhaven/wooden_military_crate", "lid": "_lid"},
     "crate_olive": {"length": 0.8, "file": "polyhaven/old_military_crate", "only": "_a"},
@@ -129,6 +130,21 @@ class Builder:
         g = bmesh.ops.create_cone(self.bm, cap_ends=True, segments=segs, radius1=r1, radius2=r2,
                                   depth=depth, matrix=Matrix.LocRotScale(Vector(loc), Euler(rot), None))
         self._tag(g["verts"], mat)
+
+    def prism(self, pts_xz, thick, mat, y=0.0):
+        """XZ düzleminde verilen yan profili Y boyunca thick kalınlığında ekstrüde eder."""
+        bm = self.bm
+        a = [bm.verts.new((x, y - thick / 2, z)) for x, z in pts_xz]
+        b = [bm.verts.new((x, y + thick / 2, z)) for x, z in pts_xz]
+        faces = [bm.faces.new(list(reversed(a))), bm.faces.new(b)]
+        n = len(pts_xz)
+        for i in range(n):
+            j = (i + 1) % n
+            faces.append(bm.faces.new((a[i], a[j], b[j], b[i])))
+        mi = self._mi(mat)
+        for f in faces:
+            f.material_index = mi
+        bmesh.ops.recalc_face_normals(bm, faces=faces)
 
     def build(self, name, bevel=0.0):
         me = bpy.data.meshes.new(name)
@@ -348,6 +364,10 @@ def make_materials():
     M["olive2"] = material("olive_dark", (0.03, 0.035, 0.022), 0.75)
     M["tire"] = material("tire", (0.012, 0.012, 0.012), 0.9)
     M["gun"] = material("gunmetal", (0.02, 0.02, 0.022), 0.42, 0.7)
+    M["anodized"] = material("anodized_black", (0.018, 0.018, 0.02), 0.48, 0.5)
+    M["parkerized"] = material("parkerized", (0.022, 0.022, 0.022), 0.55, 0.65)
+    M["fde"] = material("fde_polymer", (0.22, 0.16, 0.09), 0.65)
+    M["lens"] = material("lens", (0.02, 0.03, 0.04), 0.05, 0.3)
     M["polymer"] = material("polymer", (0.025, 0.025, 0.025), 0.7)
     M["canvas"] = material("canvas", (0.07, 0.07, 0.045), 0.95)
     M["glass"] = material("glass", (0.01, 0.012, 0.015), 0.08, 0.2)
@@ -446,6 +466,79 @@ def proxy_ammo():
     return [b.build("ammo_proxy", bevel=0.004)]
 
 
+def rail(b, x0, x1, loc_yz, mat, axis="top"):
+    """Picatinny ray: taban + 5.2 mm aralıklı dişler. axis: top / bottom / left / right."""
+    y, z = loc_yz
+    n = int((x1 - x0) / 0.0104)
+    size = {"top": (x1 - x0, 0.021, 0.006), "bottom": (x1 - x0, 0.021, 0.006),
+            "left": (x1 - x0, 0.006, 0.021), "right": (x1 - x0, 0.006, 0.021)}[axis]
+    b.box(size, ((x0 + x1) / 2, y, z), mat)
+    off = {"top": (0, 0, 0.004), "bottom": (0, 0, -0.004), "left": (0, 0.004, 0), "right": (0, -0.004, 0)}[axis]
+    tooth = (0.0052, 0.022, 0.004) if axis in ("top", "bottom") else (0.0052, 0.004, 0.022)
+    for i in range(n):
+        b.box(tooth, (x0 + 0.005 + i * 0.0104, y + off[1], z + off[2]), mat)
+
+
+def proxy_m4(furniture=None):
+    """M4A1 karabina, gerçek ölçülerde (toplam ~0.84 m, 14.5" namlu): +X namlu, +Z yukarı.
+
+    Üst/alt gövde, düz üst pikatinni ray, quad rail el kundağı, A2 arpacık, kuş kafesi alev
+    gizleyici, kavisli 30'luk STANAG şarjör, tabanca kabzası, tampon borusu + teleskopik dipçik,
+    red dot nişangah, dikey ön tutamak ve taktik fener.
+    """
+    b = Builder()
+    al, st, pl = M["anodized"], M["parkerized"], furniture or M["polymer"]
+    # gövde
+    b.box((0.225, 0.05, 0.056), (0.005, 0, 0.028), al)                     # üst gövde
+    b.box((0.03, 0.052, 0.026), (0.06, 0, 0.014), al)                      # kovan kapağı bölgesi
+    b.cyl(0.009, 0.009, 0.025, (-0.03, -0.031, 0.034), al, (0, math.pi / 2, 0), segs=10)  # forward assist
+    b.box((0.03, 0.04, 0.008), (-0.12, 0, 0.05), al)                       # kurma kolu
+    b.prism([(-0.088, -0.002), (0.092, -0.002), (0.092, -0.03), (0.088, -0.072), (0.02, -0.072),
+             (0.016, -0.046), (-0.03, -0.046), (-0.07, -0.042), (-0.088, -0.02)], 0.048, al)  # alt gövde
+    b.box((0.05, 0.01, 0.004), (-0.005, 0, -0.066), st)                    # tetik korkuluğu
+    b.box((0.004, 0.01, 0.024), (0.018, 0, -0.056), st)
+    b.box((0.006, 0.006, 0.022), (-0.002, 0, -0.054), st, (0, 0.3, 0))     # tetik
+    rail(b, -0.1, 0.115, (0, 0.06), al)
+    # 30'luk STANAG şarjör: öne doğru kavisli
+    back = [(0.024 + 0.04 * t * t, -0.07 - 0.172 * t) for t in [i / 8 for i in range(9)]]
+    front = [(0.084 + 0.06 * t * t, -0.07 - 0.168 * t) for t in [i / 8 for i in range(9)]]
+    b.prism(back + list(reversed(front)), 0.024, st)
+    b.prism([(0.058, -0.24), (0.15, -0.233), (0.152, -0.25), (0.06, -0.256)], 0.028, pl)  # taban
+    # A2 kabza
+    b.prism([(-0.038, -0.044), (-0.072, -0.152), (-0.108, -0.147), (-0.1, -0.12), (-0.08, -0.044)], 0.03, pl)
+    # tampon borusu ve SOPMOD tarzı dipçik
+    b.cyl(0.0155, 0.0155, 0.2, (-0.19, 0, 0.026), al, (0, math.pi / 2, 0), segs=16)
+    b.prism([(-0.255, 0.05), (-0.41, 0.058), (-0.43, 0.06), (-0.432, -0.072), (-0.412, -0.078),
+             (-0.36, -0.03), (-0.3, -0.004), (-0.255, 0.002)], 0.044, pl)
+    b.box((0.016, 0.046, 0.14), (-0.438, 0, -0.006), M["tire"])            # dipçik pedi
+    b.prism([(-0.27, 0.05), (-0.4, 0.056), (-0.4, 0.076), (-0.3, 0.07)], 0.05, pl)  # yanak desteği
+    # el kundağı (quad rail) ve namlu
+    b.box((0.19, 0.05, 0.05), (0.215, 0, 0.026), al)
+    for ax, yz in (("top", (0, 0.055)), ("bottom", (0, -0.003)), ("left", (0.029, 0.026)),
+                   ("right", (-0.029, 0.026))):
+        rail(b, 0.125, 0.305, yz, al, ax)
+    b.cyl(0.0095, 0.0095, 0.16, (0.38, 0, 0.026), st, (0, math.pi / 2, 0), segs=14)
+    b.prism([(0.312, 0.034), (0.35, 0.034), (0.338, 0.102), (0.326, 0.102)], 0.02, st)  # A çerçeveli arpacık
+    b.box((0.003, 0.003, 0.012), (0.332, 0, 0.11), st)
+    b.cyl(0.011, 0.011, 0.045, (0.475, 0, 0.026), st, (0, math.pi / 2, 0), segs=12)  # alev gizleyici
+    # red dot + montaj
+    b.box((0.05, 0.03, 0.02), (-0.015, 0, 0.075), al)
+    b.cyl(0.021, 0.021, 0.11, (-0.015, 0, 0.105), al, (0, math.pi / 2, 0), segs=20)
+    b.cyl(0.024, 0.024, 0.02, (0.045, 0, 0.105), al, (0, math.pi / 2, 0), segs=20)
+    b.cyl(0.019, 0.019, 0.004, (0.056, 0, 0.105), M["lens"], (0, math.pi / 2, 0), segs=20)
+    b.box((0.02, 0.02, 0.012), (-0.015, -0.025, 0.105), al)                 # ayar düğmesi
+    # dikey tutamak ve fener
+    b.cyl(0.014, 0.012, 0.095, (0.245, 0, -0.052), pl, segs=14)
+    b.cyl(0.012, 0.012, 0.085, (0.26, -0.036, 0.026), al, (0, math.pi / 2, 0), segs=14)
+    b.cyl(0.0125, 0.0125, 0.004, (0.304, -0.036, 0.026), M["lens"], (0, math.pi / 2, 0), segs=14)
+    o = b.build("m4a1", bevel=0.0015)
+    # kökeni alt-orta noktaya taşı (dış modellerle aynı kural)
+    xs = [v.co.x for v in o.data.vertices]
+    zs = [v.co.z for v in o.data.vertices]
+    o.data.transform(Matrix.Translation((-(min(xs) + max(xs)) / 2, 0, -min(zs))))
+    return [o]
+
+
 def wheel_mesh(r, w):
     b = Builder()
     b.cyl(r, r, w, (0, 0, 0), M["tire"], (math.pi / 2, 0, 0), segs=24)
@@ -535,6 +628,8 @@ def proxy_pine():
 
 
 PROXIES = {
+    "rifle": proxy_m4,
+    "rifle_fde": lambda: proxy_m4(M["fde"]),
     "crate": proxy_crate,
     "crate_open": lambda: proxy_crate(open_=True),
     "ammo": proxy_ammo,
@@ -846,10 +941,12 @@ def shot_secure(pine):
     # Ortada kapağı açık tüfek kasası, yanında açık yeşil mühimmat kasası.
     open_c = place("crate_open", O + Vector((0.1, -0.6, 0)), 0.05)
     # Tüfekler kasanın önüne dik dayalı: alçak kameradan yan profilleri görünür.
-    for x, lean, roll in ((-0.32, -11, -3), (0.05, -13, 2), (0.42, -10, 5)):
+    for name, x, lean, roll in (("rifle", -0.34, -12, -3), ("rifle_fde", 0.04, -14, 2), ("rifle", 0.4, -11, 5)):
         r = Matrix.Rotation(math.radians(lean), 3, "X") @ Matrix.Rotation(math.radians(roll), 3, "Y") \
             @ Matrix.Rotation(math.radians(-88), 3, "Y")
-        place("rifle", O + Vector((0.1 + x, -0.97, 0.56)), rot=r.to_euler())
+        place(name, O + Vector((0.1 + x, -0.97, 0.43)), rot=r.to_euler())
+    # Sağdaki yığının üstünde yatan bir M4 daha (yan profil kameraya dönük).
+    place("rifle", O + Vector((2.72, 1.95, CRATE_H + 2 * 0.27)), -0.15)
     ammo_c = place("crate_olive_open", O + Vector((-1.15, -0.35, 0)), -0.35)
     for dx in (-0.2, 0.08):
         place("ammo", (dx, 0.0, 0.05), math.pi / 2, parent=ammo_c)
