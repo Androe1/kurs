@@ -127,3 +127,32 @@ python glitch_intro.py --still 4.6      # tek kareyi PNG kaydet
 - `output/taslak/` - onay için storyboard, hareket önizlemesi ve referansla senkron karşılaştırma
 
 Linux'ta sunucuda çalıştırmak için `libegl1` gerekir (ekran kartı gerekmez, llvmpipe ile çalışır).
+
+---
+
+# SCP Sinematiği (7 saniye, Blender)
+
+Referans: SCP: Roleplay videosunun 00:25-00:32 arası (siyah ekran + üç sert kesme).
+Karakter yok; silah kasaları, zırhlı araçlar, sisli çam ormanı ve tesis kapısı.
+
+| Saniye    | Plan    | Görüntü                                                                     | Ses                                  |
+|-----------|---------|-----------------------------------------------------------------------------|--------------------------------------|
+| 0 - 1     | –       | siyah                                                                       | sessizlik, sonda emme                |
+| 1 - 3     | SECURE  | sisli ormanda kasa deposu; ön plandaki kasa yığını kayarken yazı arkasından belirir; ortada kapağı açık tüfek kasası, asılı çalışma lambası | vuruş, whoosh, kilit klak'ı |
+| 3 - 5     | CONTAIN | gece orman yolu; tepe lambası dönen iki zırhlı araç önden geçer, yazı aralarından ve sonra görünür | vuruş, dizel motorlar (Doppler, sol->sağ) |
+| 5 - 7     | PROTECT | kamera harflerin altından geçip ormandaki tesis kapısına, amblemin önüne ilerler; projektörler, kule, park etmiş kamyonlar | vuruş, whoosh, sonda büyük vuruş |
+
+```bash
+python3.11 -m pip install bpy==4.2.0               # Blender Python modülü (Python 3.11)
+python3.11 blender/scp_cinematic.py --preview      # hızlı önizleme kareleri (640x360)
+python scp_intro.py --preview                      # output/taslak/scp_onizleme.mp4
+python3.11 blender/scp_cinematic.py                # final kareler (1920x1080, EEVEE)
+python scp_intro.py                                # output/scp_cinematic.mp4
+python3.11 blender/scp_cinematic.py --preview --still 100,240,395   # tek tek kareler
+```
+
+- `blender/scp_cinematic.py` - sahne, ışık, sis, kamera ve render (headless bpy)
+- `scp_sound.py` - ses tasarımı (numpy ile sentez; zamanlar `meta.json`'dan)
+- `scp_intro.py` - siyah giriş, vinyet, film greni, ses -> MP4
+- `assets/models/` - dış modeller (kasa, tüfek, zırhlı araç, kamyon, çam); yoksa blok modeller
+  kullanılır, bkz. `assets/models/README.md`
