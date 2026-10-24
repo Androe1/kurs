@@ -1196,14 +1196,19 @@ def setup_scene(preview):
     return s
 
 
-def build(preview):
+def build(preview, only=None):
+    """only: kurulacak planların adları (bellek için; None = hepsi)."""
     s = setup_scene(preview)
     make_materials()
     pine_root = asset("pine", proxy_pine)
     pine = realize_tree_template(pine_root)
     events = {"cuts": [frame_time(SHOTS[k][0]) for k in ("secure", "contain", "protect")],
               "end": frame_time(F_END + 1)}
-    for name, fn in (("secure", shot_secure), ("contain", shot_contain), ("protect", shot_protect)):
+    for i, (name, fn) in enumerate((("secure", shot_secure), ("contain", shot_contain),
+                                    ("protect", shot_protect))):
+        if only is not None and name not in only:
+            continue
+        random.seed(7 + i)  # plan başına sabit tohum: tek plan kurulsa da aynı sonuç
         cam, ev = fn(pine)
         events.update(ev)
         mk = s.timeline_markers.new(name, frame=SHOTS[name][0])
@@ -1222,11 +1227,16 @@ def main():
     ap.add_argument("--out", help="çıktı klasörü (varsayılan renders/scp veya renders_preview/scp)")
     ap.add_argument("--save-blend", action="store_true", help="sahneyi .blend olarak da kaydet")
     a = ap.parse_args(argv)
-    random.seed(7)
-    s, events = build(a.preview)
+    frames = [int(f) for f in a.still.split(",")] if a.still else (
+        list(range(*[int(v) + k for k, v in enumerate(a.frames.split("-"))])) if a.frames else None)
+    only = None if frames is None else {k for k, (f0, f1, _) in SHOTS.items() if any(f0 <= f <= f1 for f in frames)}
+    s, events = build(a.preview, only)
     out = Path(a.out) if a.out else ROOT / ("renders_preview" if a.preview else "renders") / "scp"
     out.mkdir(parents=True, exist_ok=True)
-    (out / "meta.json").write_text(json.dumps({"fps": FPS, "first_frame": F_START, "step": a.step, **events}, indent=2))
+    meta_path = out / "meta.json"  # kısmi kurulumlar olayları mevcut meta.json ile birleştirir
+    meta = json.loads(meta_path.read_text()) if meta_path.exists() and only else {}
+    meta.update({"fps": FPS, "first_frame": F_START, "step": a.step, **events})
+    meta_path.write_text(json.dumps(meta, indent=2))
     if a.save_blend:
         bpy.ops.wm.save_as_mainfile(filepath=str(out / "scp_cinematic.blend"))
     if a.still:
