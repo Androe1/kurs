@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 renders/
 renders_preview/
+assets/models/polyhaven/

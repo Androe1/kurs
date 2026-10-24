@@ -26,6 +26,7 @@ Yönler ve ölçek otomatik ayarlanır; gerekirse assets/models/models.json ile 
 import argparse
 import json
 import math
+import os
 import random
 import sys
 from pathlib import Path
@@ -47,14 +48,25 @@ SHOTS = {  # ad: (ilk kare, son kare, sahnenin dünya ofseti)
 }
 
 # Modelin yönü: ileri (namlu / aracın önü) +X, yukarı +Z, taban z=0.
+# file: assets/models altındaki klasör (Poly Haven, CC0; assets/fetch_polyhaven.py indirir)
+# only: yalnızca adı bu ekle biten parçalar; lid: kapağı arka menteşeden açılacak parça.
 ASSET_SPECS = {
-    "rifle": {"length": 0.95},
+    "rifle": {"length": 1.08, "file": "polyhaven/bolt_action_rifle_7_62"},
+    "crate": {"length": 1.25, "file": "polyhaven/wooden_military_crate"},
+    "crate_open": {"length": 1.25, "file": "polyhaven/wooden_military_crate", "lid": "_lid"},
+    "crate_olive": {"length": 0.8, "file": "polyhaven/old_military_crate", "only": "_a"},
+    "crate_olive_open": {"length": 0.8, "file": "polyhaven/old_military_crate", "only": "_b"},
+    "ammo": {"length": 0.26, "file": "polyhaven/ammo_box", "rot": (0, 0, 90)},
+    "jerrycan": {"length": 0.37, "file": "polyhaven/metal_jerrycan_green"},
+    "generator": {"length": 0.82, "file": "polyhaven/portable_generator"},
+    "hang_lamp": {"height": 1.36, "file": "polyhaven/hanging_industrial_lamp"},
+    "barrier": {"length": 1.55, "file": "polyhaven/concrete_road_barrier"},
+    "fence": {"length": 1.91, "file": "polyhaven/modular_chainlink_fence", "only": "_fence_double"},
+    "log": {"length": 3.05, "file": "polyhaven/dead_tree_trunk"},
+    "stump": {"length": 1.43, "file": "polyhaven/tree_stump_01"},
     "apc": {"length": 7.0},
     "truck": {"length": 7.5},
     "pine": {"height": 1.0},  # ağaçlar sahnede ayrıca ölçeklenir
-    "crate": {"length": 1.25},
-    "crate_open": {"length": 1.25},
-    "ammo": {"length": 0.3},
 }
 
 
@@ -186,11 +198,19 @@ def look_rot(src, dst):
 
 # --------------------------------------------------------------------------- dış modeller
 
-def find_asset(name):
+def find_asset(name, spec, overrides):
+    """Önce assets/models/<ad>.* (kullanıcının modeli), sonra models.json / ASSET_SPECS 'file'."""
     for ext in (".glb", ".gltf", ".fbx", ".obj", ".blend"):
-        hits = sorted(ASSETS.glob(f"{name}*{ext}"))
+        hits = sorted(ASSETS.glob(f"{name}{ext}")) or sorted(ASSETS.glob(f"{name}_*{ext}"))
         if hits:
             return hits[0]
+    rel = overrides.get("file") or spec.get("file")
+    if rel:
+        p = ASSETS / rel
+        if p.is_dir():
+            hits = sorted(p.glob("*.gltf")) + sorted(p.glob("*.glb"))
+            return hits[0] if hits else None
+        return p if p.exists() else None
     return None
 
 
@@ -216,13 +236,27 @@ def import_asset(path):
     return new
 
 
+def open_lid(objs, suffix, angle=-105):
+    """Kapağı arka üst kenarındaki menteşe çevresinde döndürür (model uzayında)."""
+    lid = next((o for o in objs if o.type == "MESH" and o.name.split(".")[0].endswith(suffix)), None)
+    if lid is None:
+        return
+    bpy.context.view_layer.update()
+    pts = [lid.matrix_world @ Vector(c) for c in lid.bound_box]
+    hinge = Vector((0, max(p.y for p in pts), max(p.z for p in pts)))
+    rot = Matrix.Translation(hinge) @ Matrix.Rotation(math.radians(angle), 4, "X") @ Matrix.Translation(-hinge)
+    for o in [lid] + [c for c in objs if c.parent is lid]:
+        if o.parent is None or o is lid:
+            o.matrix_world = rot @ o.matrix_world
+
+
 def normalize(root, objs, spec, overrides):
     """Modeli root altında +X ileri, taban z=0, merkez x=y=0 olacak şekilde ölçekler."""
     pivot = empty(root.name + "_pivot", parent=root)
     for o in objs:
         if o.parent is None:
             o.parent = pivot
-    pivot.rotation_euler = [math.radians(a) for a in overrides.get("rot", (0, 0, 0))]
+    pivot.rotation_euler = [math.radians(a) for a in overrides.get("rot", spec.get("rot", (0, 0, 0)))]
     bpy.context.view_layer.update()
     inv = root.matrix_world.inverted()
     pts = [inv @ o.matrix_world @ Vector(c) for o in objs if o.type == "MESH" for c in o.bound_box]
@@ -236,25 +270,71 @@ def normalize(root, objs, spec, overrides):
     return root
 
 
-def asset(name, proxy):
+_TEMPLATES = {}
+
+
+def clone(template, name):
+    """Şablon hiyerarşinin mesh paylaşan kopyası (aynı modeli tekrar tekrar içe aktarmamak için)."""
+    mapping = {}
+    for o in [template] + list(template.children_recursive):
+        c = o.copy()
+        link(c)
+        mapping[o] = c
+    for o, c in mapping.items():
+        if o.parent in mapping:
+            c.parent = mapping[o.parent]
+            c.matrix_parent_inverse = o.matrix_parent_inverse.copy()
+    root = mapping[template]
+    root.name = name
+    root.parent = None
+    root.location, root.rotation_euler, root.scale = (0, 0, 0), (0, 0, 0), (1, 1, 1)
+    for c in mapping.values():
+        c.hide_render = c.hide_viewport = False
+    return root
+
+
+def proxy_box(name, spec):
+    b = Builder()
+    L = spec.get("length", spec.get("height", 1.0))
+    b.box((L, L * 0.45, L * 0.4), (0, 0, L * 0.2), M["olive"])
+    return [b.build(name + "_proxy", bevel=0.01)]
+
+
+def asset(name, proxy=None):
     """Dış model varsa onu, yoksa blok modeli döndürür; ikisi de bir root empty altında."""
-    path = find_asset(name)
+    if name in _TEMPLATES:
+        return clone(_TEMPLATES[name], name)
+    spec = ASSET_SPECS[name]
     overrides = {}
     manifest = ASSETS / "models.json"
     if manifest.exists():
         overrides = json.loads(manifest.read_text()).get(name, {})
-        if "file" in overrides:
-            path = ASSETS / overrides["file"]
+    path = find_asset(name, spec, overrides)
     root = empty(name)
-    if path and path.exists():
+    if path:
         objs = import_asset(path)
-        normalize(root, objs, ASSET_SPECS[name], overrides)
+        only = overrides.get("only", spec.get("only"))
+        if only:
+            keep = {o for o in objs if o.type == "MESH" and o.name.split(".")[0].endswith(only)}
+            for o in [o for o in objs if o.type == "MESH" and o not in keep]:
+                objs.remove(o)
+                bpy.data.objects.remove(o)
+        if spec.get("lid"):
+            open_lid(objs, spec["lid"])
+        normalize(root, objs, spec, overrides)
         root["external"] = path.name
-        print(f"[model] {name}: {path.name}")
+        print(f"[model] {name}: {path.relative_to(ROOT) if ROOT in path.parents else path.name}")
     else:
-        for o in proxy():
+        for o in (proxy or (lambda: proxy_box(name, spec)))():
             o.parent = root
         print(f"[model] {name}: blok model (assets/models/{name}.glb yok)")
+    # Şablon: gizli kopya saklanır, sonraki çağrılar ondan çoğaltılır.
+    tmpl = clone(root, name + "_template")
+    for c in [tmpl] + list(tmpl.children_recursive):
+        c.hide_render = c.hide_viewport = True
+    if "external" in root:
+        tmpl["external"] = root["external"]
+    _TEMPLATES[name] = tmpl
     return root
 
 
@@ -330,7 +410,7 @@ def proxy_rifle():
     return [b.build("rifle_proxy", bevel=0.004)]
 
 
-CRATE_L, CRATE_W, CRATE_H = 1.25, 0.48, 0.34
+CRATE_L, CRATE_W, CRATE_H = 1.25, 0.52, 0.46  # Poly Haven wooden_military_crate ölçüsü
 
 
 def proxy_crate(open_=False):
@@ -726,15 +806,21 @@ def handheld(cam, amount=1.0):
 
 # --------------------------------------------------------------------------- planlar
 
+def place(name, loc, rz=0.0, parent=None, rot=None):
+    o = asset(name, PROXIES.get(name))
+    if parent is not None:
+        o.parent = parent
+    o.location = loc
+    o.rotation_euler = rot if rot is not None else (0, 0, rz)
+    return o
+
+
 def crate_stack(name, loc, layout, rz=0.0):
     """layout: [(model, x, y, z, rz)] yerel; kasa yığınını bir empty altında kurar."""
     root = empty(name, loc)
     root.rotation_euler = (0, 0, rz)
     for model, x, y, z, r in layout:
-        c = asset(model, PROXIES[model])
-        c.parent = root
-        c.location = (x, y, z)
-        c.rotation_euler = (0, 0, r)
+        place(model, (x, y, z), r, parent=root)
     return root
 
 
@@ -745,45 +831,48 @@ def shot_secure(pine):
     ground(O)
     fog(O + Vector((0, 20, 0)), (90, 90, 30), density=0.02)
     forest(pine, O + Vector((0, 32, 0)), (45, 30), 170, [(-7, 7, -32, -10)], seed=1)
-    H = CRATE_H
-    # Arka plan: yazının altında ve iki yanında üst üste kasalar, ortada kapağı açık tüfek kasası.
-    crate_stack("pile_left", O + Vector((-2.6, 1.2, 0)), [
-        ("crate", 0, 0, 0, 0), ("crate", 0, 0.5, 0, 0.02), ("crate", 0.05, 0.25, H, -0.03),
-        ("crate", -0.1, 0.25, 2 * H, 0.05), ("ammo", 0.85, -0.2, 0, 0.3), ("ammo", 0.85, -0.2, 0.24, 0.1)],
-        rz=0.12)
-    crate_stack("pile_right", O + Vector((2.7, 1.6, 0)), [
-        ("crate", 0, 0, 0, 0), ("crate", 0, 0.5, 0, 0), ("crate", 0, 0.25, H, 0.04),
-        ("ammo", -0.9, -0.3, 0, -0.2), ("ammo", -0.9, 0.0, 0, 0.1), ("ammo", -0.9, -0.15, 0.24, 0.0)],
-        rz=-0.18)
-    crate_stack("pile_back", O + Vector((0.4, 4.5, 0)), [
-        ("crate", x, y, z, 0) for x in (-1.3, 0, 1.3) for y in (0, 0.5) for z in (0, H)])
-    open_c = asset("crate_open", PROXIES["crate_open"])
-    open_c.location = O + Vector((0.1, -0.6, 0))
-    open_c.rotation_euler = (0, 0, 0.05)
-    for i, dy in enumerate((-0.11, 0.0, 0.11)):
-        r = asset("rifle", proxy_rifle)
-        r.parent = open_c
-        r.location = (0.02 * i, dy, 0.12)
-        r.rotation_euler = (math.radians(90), 0, math.pi * (i % 2))
-    # Işık: kasaların üstünde asılı çalışma lambası, arkada sisi delen projektör.
-    lamp = Builder()
-    lamp.cyl(0.18, 0.05, 0.16, (0, 0, 0), M["steel"], segs=16)
-    lamp.cyl(0.12, 0.12, 0.02, (0, 0, -0.08), M["lamp"], segs=16)
-    lamp.cyl(0.004, 0.004, 3, (0, 0, 1.5), M["wire"], segs=4)
-    lamp.build("work_lamp").location = O + Vector((0.3, -0.2, 3.3))
-    spot("work_light", O + Vector((0.3, -0.2, 3.2)), O + Vector((0.2, 0, 0)), 2500, (1, 0.9, 0.75), 95, 0.8, 25)
+    H, OH = CRATE_H, 0.27  # ahşap kasa / yeşil kasa yüksekliği
+    # Arka plan: yazının altında ve iki yanında üst üste kasalar.
+    crate_stack("pile_left", O + Vector((-2.7, 1.3, 0)), [
+        ("crate", 0, 0, 0, 0), ("crate", 0, 0.56, 0, 0.02), ("crate", 0.05, 0.28, H, -0.04),
+        ("crate_olive", 0.1, 0.3, 2 * H, 0.06), ("ammo", 0.85, -0.15, 0, 0.3), ("ammo", 0.83, -0.12, 0.18, 0.1),
+        ("jerrycan", -0.95, -0.1, 0, 1.4), ("jerrycan", -0.95, 0.15, 0, 1.6)], rz=0.12)
+    crate_stack("pile_right", O + Vector((2.75, 1.7, 0)), [
+        ("crate", 0, 0, 0, 0), ("crate", 0, 0.56, 0, 0), ("crate_olive", 0.1, 0.25, H, 0.04),
+        ("crate_olive", 0.0, 0.3, H + OH, -0.05), ("generator", -1.05, -0.25, 0, 0.5),
+        ("ammo", 0.95, -0.4, 0, -0.2), ("ammo", 0.95, -0.1, 0, 0.1)], rz=-0.18)
+    crate_stack("pile_back", O + Vector((0.4, 4.6, 0)), [
+        ("crate", x, y, z, 0) for x in (-1.35, 0, 1.35) for y in (0, 0.56) for z in (0, H)])
+    # Ortada kapağı açık tüfek kasası, yanında açık yeşil mühimmat kasası.
+    open_c = place("crate_open", O + Vector((0.1, -0.6, 0)), 0.05)
+    # Tüfekler kasanın önüne dik dayalı: alçak kameradan yan profilleri görünür.
+    for x, lean, roll in ((-0.32, -11, -3), (0.05, -13, 2), (0.42, -10, 5)):
+        r = Matrix.Rotation(math.radians(lean), 3, "X") @ Matrix.Rotation(math.radians(roll), 3, "Y") \
+            @ Matrix.Rotation(math.radians(-88), 3, "Y")
+        place("rifle", O + Vector((0.1 + x, -0.97, 0.56)), rot=r.to_euler())
+    ammo_c = place("crate_olive_open", O + Vector((-1.15, -0.35, 0)), -0.35)
+    for dx in (-0.2, 0.08):
+        place("ammo", (dx, 0.0, 0.05), math.pi / 2, parent=ammo_c)
+    place("log", O + Vector((3.4, -1.2, 0)), 0.4)
+    place("stump", O + Vector((-3.6, 3.2, -0.1)), 1.0)
+    # Işık: kasaların üstünde asılı endüstriyel lamba, arkada sisi delen projektör.
+    lamp = O + Vector((1.25, -0.9, 2.75))
+    place("hang_lamp", lamp)
+    spot("work_light", lamp - Vector((0, 0, 0.06)), O + Vector((0.2, -0.4, 0)), 3500, (1, 0.86, 0.66), 110,
+         0.8, 25)
+    point("lamp_bulb", lamp + Vector((0, 0, 0.1)), 20, (1, 0.85, 0.65), 0.04, 6)
+    spot("fg_fill", O + Vector((1.8, -6.4, 2.2)), O + Vector((0, -4.7, 1.0)), 120, (1, 0.85, 0.65), 40, 0.8, 6)
     spot("backlight", O + Vector((1.5, 24, 5)), O + Vector((0, -6, 1.2)), 22000, (0.78, 0.86, 1.0), 70, 0.9,
          80, shadow=True)
     spot("backlight_hi", O + Vector((-8, 40, 14)), O + Vector((0, 0, 0)), 25000, (0.7, 0.8, 1.0), 35, 0.8, 90)
-    txt = text3d("SECURE", "SECURE", O + Vector((0, 0.2, 1.45)), 0.66, reveal=True)
+    txt = text3d("SECURE", "SECURE", O + Vector((0, 0.2, 1.5)), 0.66, reveal=True)
 
     # Ön plan: kameraya 1.3 m mesafede yüksek kasa yığını. Kamera sağa kaydıkça yığın sola akar.
     fg = crate_stack("pile_fg", O + Vector((0.0, -4.7, 0)), [
         ("crate", 0, 0, 0, math.pi / 2), ("crate", 0.02, 0, H, math.pi / 2 + 0.03),
-        ("crate", -0.02, 0, 2 * H, math.pi / 2 - 0.02), ("crate", 0.0, 0, 3 * H, math.pi / 2 + 0.05),
-        ("crate", 0.01, 0, 4 * H, math.pi / 2 - 0.04), ("ammo", 0.05, 0.1, 5 * H, 0.2)])
-    edge = empty("fg_edge", (0.27, -0.1, 1.4), fg)  # yığının sağ (sona kalan) kenarı
-
+        ("crate", -0.02, 0, 2 * H, math.pi / 2 - 0.02), ("crate", 0.0, 0, 3 * H, math.pi / 2 + 0.04),
+        ("ammo", 0.02, 0.15, 4 * H, 0.2)])
+    edge = empty("fg_edge", (CRATE_W / 2 + 0.03, -0.1, 1.4), fg)  # yığının sağ (sona kalan) kenarı
     c0, c1 = O + Vector((-0.45, -6.0, 1.3)), O + Vector((1.35, -6.0, 1.34))
     cam = camera("cam_secure", 32, c0, c0 + Vector((0, 6, 0.18)), 4.0, txt)
     for f in range(f0, f1 + 1, 2):
@@ -912,6 +1001,17 @@ def shot_protect(pine):
         tr.rotation_euler = (0, 0, rz)
         rig_vehicle(tr, 1400)
 
+    # Kapıya giden yol: iki yanda tel örgü çit, yolda zikzak beton bariyerler.
+    for sx in (-1, 1):
+        for k in range(10):
+            y = 8.5 + k * 1.91
+            place("fence", O + Vector((sx * 5.2, y + 0.95, 0)), math.pi / 2)
+            pb = Builder()
+            pb.cyl(0.04, 0.04, 2.6, (0, 0, 1.3), M["steel"], segs=8)
+            pb.build("fence_post").location = O + Vector((sx * 5.2, y, 0))
+    for x, y, rz in ((-2.2, 17.5, 0.08), (-0.6, 17.6, -0.05), (1.6, 21.0, 0.1), (3.1, 21.1, -0.04),
+                     (-3.0, 24.0, 0.0), (-1.4, 24.1, 0.06)):
+        place("barrier", O + Vector((x, y, 0)), rz)
     txt = text3d("PROTECT", "PROTECT", O + Vector((0, 1.5, 2.0)), 0.95)
     spot("text_key", O + Vector((0, -3, 5)), O + Vector((0, 1.5, 2.3)), 700, (0.85, 0.92, 1), 35, 0.6, 20)
 
@@ -1032,5 +1132,11 @@ def main():
     bpy.ops.render.render(animation=True)
 
 
-if __name__ == "__main__":
+def run():
     main()
+    sys.stdout.flush()
+    os._exit(0)  # bpy modülü glTF dokularını bırakırken çıkışta çökebiliyor; kareler yazıldı
+
+
+if __name__ == "__main__":
+    run()

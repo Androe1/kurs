@@ -1,5 +1,17 @@
 # Dış modeller (SCP sinematiği)
 
+Poly Haven (CC0) modelleri tek komutla iner (git'e eklenmez, ~120 MB):
+
+```bash
+python assets/fetch_polyhaven.py
+```
+
+Kullanılanlar: wooden_military_crate (kasa + kapağı açık kasa), old_military_crate (yeşil
+kasalar), ammo_box, bolt_action_rifle_7_62, metal_jerrycan_green, portable_generator,
+hanging_industrial_lamp, dead_tree_trunk, tree_stump_01, concrete_road_barrier,
+modular_chainlink_fence. Poly Haven'de askerî araç yok: `apc` ve `truck` için kendi modelini
+bu klasöre koy (yoksa blok model kullanılır).
+
 `blender/scp_cinematic.py` bu klasöre bakar. Dosya adı aşağıdaki addan başlıyorsa
 (`.glb` / `.gltf` / `.fbx` / `.obj` / `.blend`) blok model yerine o kullanılır.
 Ölçek, taban ve merkez otomatik ayarlanır.

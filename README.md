@@ -144,6 +144,7 @@ Karakter yok; silah kasaları, zırhlı araçlar, sisli çam ormanı ve tesis ka
 
 ```bash
 python3.11 -m pip install bpy==4.2.0               # Blender Python modülü (Python 3.11)
+python assets/fetch_polyhaven.py                   # Poly Haven modelleri (CC0, ~120 MB)
 python3.11 blender/scp_cinematic.py --preview      # hızlı önizleme kareleri (640x360)
 python scp_intro.py --preview                      # output/taslak/scp_onizleme.mp4
 python3.11 blender/scp_cinematic.py                # final kareler (1920x1080, EEVEE)
@@ -154,5 +155,6 @@ python3.11 blender/scp_cinematic.py --preview --still 100,240,395   # tek tek ka
 - `blender/scp_cinematic.py` - sahne, ışık, sis, kamera ve render (headless bpy)
 - `scp_sound.py` - ses tasarımı (numpy ile sentez; zamanlar `meta.json`'dan)
 - `scp_intro.py` - siyah giriş, vinyet, film greni, ses -> MP4
-- `assets/models/` - dış modeller (kasa, tüfek, zırhlı araç, kamyon, çam); yoksa blok modeller
-  kullanılır, bkz. `assets/models/README.md`
+- `assets/models/` - dış modeller: kasalar, tüfek, mühimmat, bidon, jeneratör, lamba, bariyer, çit
+  Poly Haven'den (`assets/fetch_polyhaven.py`); zırhlı araç ve kamyon için model yoksa blok
+  modeller kullanılır, bkz. `assets/models/README.md`
