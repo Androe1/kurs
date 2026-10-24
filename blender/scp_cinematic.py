@@ -28,6 +28,7 @@ import json
 import math
 import os
 import random
+import re
 import sys
 from pathlib import Path
 
@@ -214,6 +215,11 @@ def look_rot(src, dst):
 
 # --------------------------------------------------------------------------- dış modeller
 
+def base_name(obj):
+    """Blender'ın eklediği .001 sonekini atar ("5.56x45.001" -> "5.56x45")."""
+    return re.sub(r"\.\d{3}$", "", obj.name)
+
+
 def find_asset(name, spec, overrides):
     """Önce assets/models/<ad>.* (kullanıcının modeli), sonra models.json / ASSET_SPECS 'file'."""
     for ext in (".glb", ".gltf", ".fbx", ".obj", ".blend"):
@@ -254,7 +260,7 @@ def import_asset(path):
 
 def open_lid(objs, suffix, angle=-105):
     """Kapağı arka üst kenarındaki menteşe çevresinde döndürür (model uzayında)."""
-    lid = next((o for o in objs if o.type == "MESH" and o.name.split(".")[0].endswith(suffix)), None)
+    lid = next((o for o in objs if o.type == "MESH" and base_name(o).endswith(suffix)), None)
     if lid is None:
         return
     bpy.context.view_layer.update()
@@ -329,9 +335,16 @@ def asset(name, proxy=None):
     root = empty(name)
     if path:
         objs = import_asset(path)
+        drop = set(overrides.get("drop", spec.get("drop", [])))
+        if drop:  # istenmeyen parçalar (ör. modelle gelen tek mermi) ve alt nesneleri
+            gone = {o for o in objs if base_name(o) in drop}
+            gone |= {c for o in gone for c in o.children_recursive}
+            for o in gone:
+                objs.remove(o)
+                bpy.data.objects.remove(o)
         only = overrides.get("only", spec.get("only"))
         if only:
-            keep = {o for o in objs if o.type == "MESH" and o.name.split(".")[0].endswith(only)}
+            keep = {o for o in objs if o.type == "MESH" and base_name(o).endswith(only)}
             for o in [o for o in objs if o.type == "MESH" and o not in keep]:
                 objs.remove(o)
                 bpy.data.objects.remove(o)

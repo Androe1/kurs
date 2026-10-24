@@ -1,0 +1,4 @@
+{
+  "rifle": {"rot": [0, 0, 180], "drop": ["5.56x45"]},
+  "rifle_fde": {"file": "rifle.glb", "rot": [0, 0, 180], "drop": ["5.56x45"]}
+}
