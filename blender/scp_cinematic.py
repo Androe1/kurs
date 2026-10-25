@@ -610,6 +610,7 @@ PROXIES = {
 
 
 def impostor_material(img_path, name):
+    """Hafif impostor malzemesi: doku rengi + alfa (işlemciyle çalışan EEVEE'de pahalı katmanlar yok)."""
     img = bpy.data.images.load(str(img_path), check_existing=True)
     m = bpy.data.materials.new(name)
     m.use_nodes = True
@@ -617,21 +618,10 @@ def impostor_material(img_path, name):
     p = nt.nodes["Principled BSDF"]
     tex = nt.nodes.new("ShaderNodeTexImage")
     tex.image = img
-    tex.interpolation = "Cubic"
+    tex.interpolation = "Linear"
     nt.links.new(tex.outputs["Color"], p.inputs["Base Color"])
+    nt.links.new(tex.outputs["Alpha"], p.inputs["Alpha"])
     p.inputs["Roughness"].default_value = 0.85
-    tr = nt.nodes.new("ShaderNodeBsdfTranslucent")  # arkadan gelen ışık iğnelerden süzülsün
-    nt.links.new(tex.outputs["Color"], tr.inputs["Color"])
-    mix = nt.nodes.new("ShaderNodeMixShader")
-    mix.inputs["Fac"].default_value = 0.25
-    nt.links.new(p.outputs[0], mix.inputs[1])
-    nt.links.new(tr.outputs[0], mix.inputs[2])
-    tp = nt.nodes.new("ShaderNodeBsdfTransparent")
-    mix2 = nt.nodes.new("ShaderNodeMixShader")
-    nt.links.new(tex.outputs["Alpha"], mix2.inputs["Fac"])
-    nt.links.new(tp.outputs[0], mix2.inputs[1])
-    nt.links.new(mix.outputs[0], mix2.inputs[2])
-    nt.links.new(mix2.outputs[0], nt.nodes["Material Output"].inputs["Surface"])
     m.use_backface_culling = False
     if hasattr(m, "surface_render_method"):
         m.surface_render_method = "DITHERED"
@@ -734,6 +724,7 @@ def forest(pine_mesh, center, half, count, keep_out, seed, h=(9, 17)):
         if any(x0 < x < x1 and y0 < y < y1 for x0, x1, y0, y1 in keep_out):
             continue
         t = link(bpy.data.objects.new("pine", rng.choice(meshes)))
+        t.visible_shadow = False  # alfa maskeli ağaç gölgeleri işlemcide kareyi ~10 kat yavaşlatıyor
         s = rng.uniform(*h)
         t.location = center + Vector((x, y, -0.2))
         t.scale = (s * rng.uniform(0.8, 1.1), s * rng.uniform(0.8, 1.1), s)
@@ -1361,7 +1352,7 @@ def setup_scene(preview):
 
 
 # Final kalite (ekran kartı olmadan, işlemciyle kare başına süreyi makul tutan değerler).
-QUALITY = {"samples": 32, "vol_tile": "8", "vol_samples": 64, "raytracing": False}
+QUALITY = {"samples": 16, "vol_tile": "8", "vol_samples": 48, "raytracing": False}
 SHOT_FUNCS = {"secure": shot_secure, "contain": shot_contain, "protect": shot_protect}
 
 
