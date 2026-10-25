@@ -139,7 +139,7 @@ Karakter yok; silah kasaları ve M4A1'ler, zırhlı araç konvoyu, sisli göknar
 |-----------|---------|-----------------------------------------------------------------------------|--------------------------------------|
 | 0 - 1     | –       | siyah, siyahtan yumuşak açılış                                              | emme + ters yankı kabarması          |
 | 1 - 3     | SECURE  | sisli ormanda kasa deposu; ön plandaki kasa yığını kayarken yazı arkasından belirir; odak kasalardan yazıya kayar; kasaya dayalı M4A1'ler, asılı lamba, havada toz | trailer darbesi, kayan whoosh, metal tıngırtı, lamba vızıltısı, telsiz |
-| 3 - 5     | CONTAIN | alçak kamera, gece orman yolu; tepe lambası dönen iki 8x8 zırhlı araç önden geçer, odak araçlara kayar; ön planda otlar | braam + darbe, dizel motorlar (ateşleme sırası, Doppler, sol->sağ), lastik/çakıl |
+| 3 - 5     | CONTAIN | alçak kamera, gece orman yolu; tepe lambası dönen 8x8 zırhlı araç kameranın dibinden geçip yazıyı bir an örter (odak araca kayar), ikinci araç yazının arkasındaki şeritten geçer; ön planda otlar | braam + darbe, dizel motorlar (ateşleme sırası, Doppler, sol->sağ; uzak araç kısık/boğuk), lastik/çakıl |
 | 5 - 7     | PROTECT | kamera harflerin altından geçip tesis kapısına ilerler; odak yazıdan ambleme kayar; çit, bariyer, kule, kamyonlar | darbe, harf whoosh'u, uzak siren, sonda büyük darbe |
 
 Planlar arası 0.33 sn çapraz geçiş: her plan kesmenin iki yanına 10 kare taşacak şekilde ayrı
