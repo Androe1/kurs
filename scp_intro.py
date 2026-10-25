@@ -39,12 +39,17 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         wav = Path(tmp) / "ses.wav"
         write_wav(wav, synthesize(meta))
+        # Kare listesi (concat): adımlı (--step 2) önizlemede numaralar ardışık olmadığı için.
+        pngs = sorted(p for p in frames.glob("*.png") if p.stem.isdigit())
+        lst = Path(tmp) / "kareler.txt"
+        dt = meta.get("step", 1) / fps
+        lst.write_text("".join(f"file '{p.as_posix()}'\nduration {dt}\n" for p in pngs)
+                       + f"file '{pngs[-1].as_posix()}'\n")
         vf = (f"fps={fps},tpad=start_duration={(first - 1) / fps}:color=black,"
               "vignette=angle=PI/5,noise=alls=5:allf=t,"
               "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p")
         cmd = [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error",
-               "-framerate", str(fps / meta.get("step", 1)), "-pattern_type", "glob",
-               "-i", str(frames / "[0-9][0-9][0-9][0-9].png"),
+               "-f", "concat", "-safe", "0", "-i", str(lst),
                "-i", str(wav), "-map", "0:v", "-map", "1:a", "-map_metadata", "-1",
                "-vf", vf, "-c:v", "libx264", "-preset", "slow", "-crf", "14",
                "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
