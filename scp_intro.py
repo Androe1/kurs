@@ -1,11 +1,12 @@
 """SCP tarzı 7 saniyelik sinematiği birleştirir: Blender kareleri + sentez ses -> MP4.
 
 Kullanım:
-    python3.11 blender/scp_cinematic.py            # kareler: renders/scp/####.png (+ meta.json)
+    python3.11 blender/render_chunks.py            # kareler: renders/scp/<plan>/####.png (+ meta.json)
     python scp_intro.py                            # output/scp_cinematic.mp4
     python scp_intro.py --preview                  # renders_preview/scp -> output/taslak/scp_onizleme.mp4
 
-İlk 1 saniye siyah (referanstaki gibi), ardından üç plan: SECURE / CONTAIN / PROTECT.
+Kurgu: 1 sn siyah, siyahtan yumuşak açılış, üç plan (SECURE / CONTAIN / PROTECT) arasında
+çapraz geçiş (her plan kesmenin iki yanına taşan kareleriyle render edilir), sonda kararma.
 """
 import argparse
 import json
@@ -20,6 +21,17 @@ from scp_sound import synthesize
 from sound import write_wav
 
 ROOT = Path(__file__).resolve().parent
+SHOTS = ("secure", "contain", "protect")
+FADE_IN, FADE_OUT = 0.3, 0.45
+
+
+def clip_list(frames_dir, dt, path):
+    """concat listesi: adımlı (--step 2) önizlemede numaralar ardışık olmadığı için."""
+    pngs = sorted(p for p in frames_dir.glob("*.png") if p.stem.isdigit())
+    if not pngs:
+        sys.exit(f"Kare yok: {frames_dir}")
+    path.write_text("".join(f"file '{p.as_posix()}'\nduration {dt}\n" for p in pngs)
+                    + f"file '{pngs[-1].as_posix()}'\n")
 
 
 def main():
@@ -32,28 +44,35 @@ def main():
     out = Path(a.output) if a.output else ROOT / "output" / (
         "taslak/scp_onizleme.mp4" if a.preview else "scp_cinematic.mp4")
     meta = json.loads((frames / "meta.json").read_text())
-    fps, first = meta["fps"], meta["first_frame"]
-    total = meta["end"]
+    fps, total, step = meta["fps"], meta["end"], meta.get("step", 1)
+    spans = meta["spans"]
+    t = {k: ((spans[k][0] - 1) / fps, spans[k][1] / fps) for k in SHOTS}  # final zaman çizgisinde
     out.parent.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory() as tmp:
         wav = Path(tmp) / "ses.wav"
         write_wav(wav, synthesize(meta))
-        # Kare listesi (concat): adımlı (--step 2) önizlemede numaralar ardışık olmadığı için.
-        pngs = sorted(p for p in frames.glob("*.png") if p.stem.isdigit())
-        lst = Path(tmp) / "kareler.txt"
-        dt = meta.get("step", 1) / fps
-        lst.write_text("".join(f"file '{p.as_posix()}'\nduration {dt}\n" for p in pngs)
-                       + f"file '{pngs[-1].as_posix()}'\n")
-        vf = (f"fps={fps},tpad=start_duration={(first - 1) / fps}:color=black,"
-              "vignette=angle=PI/5,noise=alls=5:allf=t,"
-              "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p")
-        cmd = [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error",
-               "-f", "concat", "-safe", "0", "-i", str(lst),
-               "-i", str(wav), "-map", "0:v", "-map", "1:a", "-map_metadata", "-1",
-               "-vf", vf, "-c:v", "libx264", "-preset", "slow", "-crf", "14",
+        inputs = []
+        for k in SHOTS:
+            lst = Path(tmp) / f"{k}.txt"
+            clip_list(frames / k, step / fps, lst)
+            inputs += ["-f", "concat", "-safe", "0", "-i", str(lst)]
+        norm = f"fps={fps},format=yuv444p,settb=AVTB"
+        a0, a1 = t["secure"]
+        b0, b1 = t["contain"]
+        c0, _ = t["protect"]
+        graph = (f"[0:v]{norm},tpad=start_duration={a0}:color=black,fade=t=in:st={a0}:d={FADE_IN}[a];"
+                 f"[1:v]{norm}[b];[2:v]{norm}[c];"
+                 f"[a][b]xfade=transition=fade:duration={a1 - b0:.4f}:offset={b0:.4f}[ab];"
+                 f"[ab][c]xfade=transition=fade:duration={b1 - c0:.4f}:offset={c0:.4f},"
+                 f"fade=t=out:st={total - FADE_OUT}:d={FADE_OUT},"
+                 "vignette=angle=PI/5,noise=alls=5:allf=t,"
+                 "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p[v]")
+        cmd = [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", *inputs, "-i", str(wav),
+               "-filter_complex", graph, "-map", "[v]", "-map", "3:a", "-map_metadata", "-1",
+               "-c:v", "libx264", "-preset", "slow", "-crf", "14",
                "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
-               "-af", f"afade=t=out:st={total - 0.35}:d=0.35",
+               "-af", f"afade=t=out:st={total - FADE_OUT}:d={FADE_OUT}",
                "-c:a", "aac", "-b:a", "320k", "-t", f"{total}", "-movflags", "+faststart", str(out)]
         if subprocess.call(cmd) != 0:
             sys.exit("ffmpeg hata verdi.")

@@ -1,67 +1,76 @@
-"""scp_cinematic.py'yi küçük kare grupları halinde, her grubu ayrı işlemde render eder.
+"""scp_cinematic.py'yi plan plan, küçük kare grupları halinde ve her grubu ayrı işlemde render eder.
 
     python3.11 blender/render_chunks.py --preview --step 2     # önizleme
-    python3.11 blender/render_chunks.py --jobs 2               # final, iki işlem paralel
+    python3.11 blender/render_chunks.py                        # final
+    python3.11 blender/render_chunks.py --shot contain --jobs 2
 
 Neden: bpy modülü (EEVEE, ekran kartı olmadan) uzun bir animasyonda her karede bellek
 biriktirir ve birkaç düzine kareden sonra bellek sınırına takılabilir. Her grup taze bir
 işlemle başlar; zaten yazılmış kareler atlanır, yani yarıda kalan render kaldığı yerden sürer.
+Kareler renders[_preview]/scp/<plan>/####.png altına yazılır.
 """
 import argparse
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-F_START, F_END = 61, 420
-SHOT_BOUNDS = [(61, 180), (181, 300), (301, 420)]  # grup bir planı aşmasın: yalnız o plan kurulur
+# scp_cinematic.SHOTS ve HANDLE ile aynı olmalı (bpy'yi yüklememek için burada tekrarlanır).
+SHOTS = {"secure": (61, 180), "contain": (181, 300), "protect": (301, 420)}
+F_START, F_END, HANDLE = 61, 420, 10
 
 
-def chunks(frames, size):
-    """Ardışık eksik kareleri plan sınırlarını aşmadan size'lık gruplara böler."""
-    out, cur = [], []
-    for f in frames:
-        shot = next(i for i, (a, b) in enumerate(SHOT_BOUNDS) if a <= f <= b)
-        if cur and (len(cur) >= size or f - cur[-1] > STEP or
-                    next(i for i, (a, b) in enumerate(SHOT_BOUNDS) if a <= cur[0] <= b) != shot):
-            out.append(cur)
-            cur = []
-        cur.append(f)
-    if cur:
-        out.append(cur)
-    return out
+def span(name):
+    f0, f1 = SHOTS[name]
+    return max(F_START, f0 - HANDLE), min(F_END, f1 + HANDLE)
 
 
 def main():
-    global STEP
     ap = argparse.ArgumentParser()
     ap.add_argument("--preview", action="store_true")
+    ap.add_argument("--shot", choices=list(SHOTS), action="append")
     ap.add_argument("--step", type=int, default=1)
-    ap.add_argument("--chunk", type=int, default=20, help="işlem başına kare sayısı")
+    ap.add_argument("--chunk", type=int, default=16, help="işlem başına kare sayısı")
     ap.add_argument("--jobs", type=int, default=1, help="aynı anda çalışan işlem sayısı")
     a = ap.parse_args()
-    STEP = a.step
     out = ROOT / ("renders_preview" if a.preview else "renders") / "scp"
-    todo = [f for f in range(F_START, F_END + 1, a.step) if not (out / f"{f:04d}.png").exists()]
-    groups = chunks(todo, a.chunk)
-    print(f"{len(todo)} kare, {len(groups)} grup", flush=True)
+    groups = []
+    for name in a.shot or list(SHOTS):
+        r0, r1 = span(name)
+        todo = [f for f in range(r0, r1 + 1, a.step) if not (out / name / f"{f:04d}.png").exists()]
+        cur = []
+        for f in todo:
+            if cur and (len(cur) >= a.chunk or f - cur[-1] != a.step):
+                groups.append((name, cur))
+                cur = []
+            cur.append(f)
+        if cur:
+            groups.append((name, cur))
+    total = sum(len(g) for _, g in groups)
+    print(f"{total} kare, {len(groups)} grup", flush=True)
+    t0 = time.time()
+    done_frames = [0]
 
-    def run(g):
-        cmd = [sys.executable, str(HERE / "scp_cinematic.py"), "--step", str(a.step),
+    def run(job):
+        name, g = job
+        cmd = [sys.executable, str(HERE / "scp_cinematic.py"), "--shot", name, "--step", str(a.step),
                "--frames", f"{g[0]}-{g[-1]}"] + (["--preview"] if a.preview else [])
         r = subprocess.run(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        done = sum((out / f"{f:04d}.png").exists() for f in g)
-        print(f"kare {g[0]}-{g[-1]}: {done}/{len(g)} (çıkış {r.returncode})", flush=True)
-        return done == len(g)
+        ok = sum((out / name / f"{f:04d}.png").exists() for f in g)
+        done_frames[0] += ok
+        el = time.time() - t0
+        eta = el / max(done_frames[0], 1) * (total - done_frames[0])
+        print(f"{name} {g[0]}-{g[-1]}: {ok}/{len(g)} (çıkış {r.returncode}) | {done_frames[0]}/{total} kare, "
+              f"kalan ~{eta / 60:.0f} dk", flush=True)
+        return ok == len(g)
 
     with ThreadPoolExecutor(a.jobs) as ex:
         ok = all(list(ex.map(run, groups)))
     sys.exit(0 if ok else 1)
 
-
-STEP = 1
 
 if __name__ == "__main__":
     main()
