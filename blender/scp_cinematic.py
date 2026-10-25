@@ -609,60 +609,63 @@ PROXIES = {
 }
 
 
+def impostor_material(img_path, name):
+    img = bpy.data.images.load(str(img_path), check_existing=True)
+    m = bpy.data.materials.new(name)
+    m.use_nodes = True
+    nt = m.node_tree
+    p = nt.nodes["Principled BSDF"]
+    tex = nt.nodes.new("ShaderNodeTexImage")
+    tex.image = img
+    tex.interpolation = "Cubic"
+    nt.links.new(tex.outputs["Color"], p.inputs["Base Color"])
+    p.inputs["Roughness"].default_value = 0.85
+    tr = nt.nodes.new("ShaderNodeBsdfTranslucent")  # arkadan gelen ışık iğnelerden süzülsün
+    nt.links.new(tex.outputs["Color"], tr.inputs["Color"])
+    mix = nt.nodes.new("ShaderNodeMixShader")
+    mix.inputs["Fac"].default_value = 0.25
+    nt.links.new(p.outputs[0], mix.inputs[1])
+    nt.links.new(tr.outputs[0], mix.inputs[2])
+    tp = nt.nodes.new("ShaderNodeBsdfTransparent")
+    mix2 = nt.nodes.new("ShaderNodeMixShader")
+    nt.links.new(tex.outputs["Alpha"], mix2.inputs["Fac"])
+    nt.links.new(tp.outputs[0], mix2.inputs[1])
+    nt.links.new(mix.outputs[0], mix2.inputs[2])
+    nt.links.new(mix2.outputs[0], nt.nodes["Material Output"].inputs["Surface"])
+    m.use_backface_culling = False
+    if hasattr(m, "surface_render_method"):
+        m.surface_render_method = "DITHERED"
+    return m
+
+
 def impostor_tree():
-    """blender/bake_trees.py'nin ürettiği üç görüntüyle çapraz düzlemli göknar (yükseklik 1)."""
+    """blender/bake_trees.py'nin pişirdiği göknarlar: her çeşit üç çapraz düzlem (yükseklik 1)."""
     d = ASSETS / "polyhaven" / "fir_tree_01"
     meta_p = d / "impostor.json"
     if not meta_p.exists():
         return None
-    meta = json.loads(meta_p.read_text())
-    aspect = meta["width"] / meta["height"]
-    me = bpy.data.meshes.new("fir_impostor")
-    bm = bmesh.new()
-    uv = bm.loops.layers.uv.new("UVMap")
-    for k, a in enumerate(meta["angles"]):
-        img = bpy.data.images.load(str(d / f"impostor_{k}.png"), check_existing=True)
-        m = bpy.data.materials.new(f"fir_impostor_{k}")
-        m.use_nodes = True
-        nt = m.node_tree
-        p = nt.nodes["Principled BSDF"]
-        tex = nt.nodes.new("ShaderNodeTexImage")
-        tex.image = img
-        tex.interpolation = "Cubic"
-        nt.links.new(tex.outputs["Color"], p.inputs["Base Color"])
-        nt.links.new(tex.outputs["Alpha"], p.inputs["Alpha"])
-        p.inputs["Roughness"].default_value = 0.85
-        tr = nt.nodes.new("ShaderNodeBsdfTranslucent")
-        nt.links.new(tex.outputs["Color"], tr.inputs["Color"])
-        mix = nt.nodes.new("ShaderNodeMixShader")
-        mix.inputs["Fac"].default_value = 0.25
-        nt.links.new(p.outputs[0], mix.inputs[1])
-        nt.links.new(tr.outputs[0], mix.inputs[2])
-        # alfa: şeffaf BSDF ile karıştır (çeviri yarı saydamlığı da alfa ile maskelensin)
-        tp = nt.nodes.new("ShaderNodeBsdfTransparent")
-        mix2 = nt.nodes.new("ShaderNodeMixShader")
-        nt.links.new(tex.outputs["Alpha"], mix2.inputs["Fac"])
-        nt.links.new(tp.outputs[0], mix2.inputs[1])
-        nt.links.new(mix.outputs[0], mix2.inputs[2])
-        nt.links.new(mix2.outputs[0], nt.nodes["Material Output"].inputs["Surface"])
-        m.use_backface_culling = False
-        if hasattr(m, "surface_render_method"):
-            m.surface_render_method = "DITHERED"
-        me.materials.append(m)
-        ang = math.radians(a)
-        right = Vector((math.cos(ang), math.sin(ang), 0))  # (-d) x z, d = kameranın baktığı yönün tersi
-        hw = aspect * 1.02 / 2
-        vs = [bm.verts.new(right * x + Vector((0, 0, z))) for x, z in
-              ((-hw, -0.01), (hw, -0.01), (hw, 1.01), (-hw, 1.01))]
-        f = bm.faces.new(vs)
-        f.material_index = k
-        f.smooth = False
-        for loop, (u, v) in zip(f.loops, ((0, 0), (1, 0), (1, 1), (0, 1))):
-            loop[uv].uv = (u, v)
-    bm.to_mesh(me)
-    bm.free()
-    print("[model] pine: göknar impostor (fir_tree_01)")
-    return me
+    meshes = []
+    for v, tree in enumerate(json.loads(meta_p.read_text())["trees"]):
+        aspect = tree["width"] / tree["height"]
+        me = bpy.data.meshes.new(f"fir_impostor_{v}")
+        bm = bmesh.new()
+        uv = bm.loops.layers.uv.new("UVMap")
+        for k, a in enumerate(tree["angles"]):
+            me.materials.append(impostor_material(d / f"impostor_{v}_{k}.png", f"fir_{v}_{k}"))
+            ang = math.radians(a)
+            right = Vector((math.cos(ang), math.sin(ang), 0))  # pişirme kamerasının sağ ekseni
+            hw = aspect * 1.02 / 2
+            vs = [bm.verts.new(right * x + Vector((0, 0, z))) for x, z in
+                  ((-hw, -0.01), (hw, -0.01), (hw, 1.01), (-hw, 1.01))]
+            f = bm.faces.new(vs)
+            f.material_index = k
+            for loop, (u, w) in zip(f.loops, ((0, 0), (1, 0), (1, 1), (0, 1))):
+                loop[uv].uv = (u, w)
+        bm.to_mesh(me)
+        bm.free()
+        meshes.append(me)
+    print(f"[model] pine: {len(meshes)} göknar çeşidi (fir_tree_01 impostor)")
+    return meshes
 
 
 def realize_tree_template(root):
@@ -720,6 +723,7 @@ def road(center, length, width, along_x=True):
 
 def forest(pine_mesh, center, half, count, keep_out, seed, h=(9, 17)):
     """center etrafında half=(hx,hy) alanına ağaç serper; keep_out: [(x0,x1,y0,y1)] yerel."""
+    meshes = pine_mesh if isinstance(pine_mesh, list) else [pine_mesh]
     rng = random.Random(seed)
     placed = 0
     tries = 0
@@ -729,7 +733,7 @@ def forest(pine_mesh, center, half, count, keep_out, seed, h=(9, 17)):
         y = rng.uniform(-half[1], half[1])
         if any(x0 < x < x1 and y0 < y < y1 for x0, x1, y0, y1 in keep_out):
             continue
-        t = link(bpy.data.objects.new("pine", pine_mesh))
+        t = link(bpy.data.objects.new("pine", rng.choice(meshes)))
         s = rng.uniform(*h)
         t.location = center + Vector((x, y, -0.2))
         t.scale = (s * rng.uniform(0.8, 1.1), s * rng.uniform(0.8, 1.1), s)
