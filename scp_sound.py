@@ -494,12 +494,14 @@ def synthesize(ev, seed=13):
         tyr = tires_gravel(rng, n_dur, ev.get("apc_speed", VEH_SPEED))
         rat = rattles(rng, n_dur, 6)
         src = eng * 0.9 + tyr * 0.55 + rat * 0.35
-        st = pass_by(src, t_mid, VEH_X_MID, ev.get("apc_speed", VEH_SPEED), VEH_Y - 0.15 * i, 1.1, t_start)
+        lane_y = ev.get("apc_lanes", [VEH_Y, VEH_Y - 0.15])[i]  # sahnedeki şerit (uzak araç daha kısık/boğuk)
+        st = pass_by(src, t_mid, VEH_X_MID, ev.get("apc_speed", VEH_SPEED), lane_y, 1.1, t_start)
         fade = np.clip((tt(n_dur) - 0.3) / 0.6, 0, 1) * np.clip((c3 + 0.6 - (t_start + tt(n_dur))) / 0.5, 0, 1)
         mx.add(st * fade[:, None], t_start, 0.75, room=0.25)
         # geçişin dibinde hava kütlesi: kısa, alçak whoosh
         ws = whoosh(rng, 0.7, 150, 600, 400, 0.6)
-        mx.add(stereo(ws, np.linspace(-0.9, 0.9, len(ws))), t_mid - 0.35, 0.25, room=0.15)
+        near = min(1.0, 5.5 / abs(lane_y - LISTENER[1]))
+        mx.add(stereo(ws, np.linspace(-0.9, 0.9, len(ws))), t_mid - 0.35, 0.25 * near ** 1.5, room=0.15)
 
     # --- geçiş 2 -> 3 (PROTECT)
     reverse_swell(mx, c3, rng, ir_hall, 0.9, 0.3)

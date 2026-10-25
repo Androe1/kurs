@@ -66,11 +66,11 @@ def main():
                  f"[a][b]xfade=transition=fade:duration={a1 - b0:.4f}:offset={b0:.4f}[ab];"
                  f"[ab][c]xfade=transition=fade:duration={b1 - c0:.4f}:offset={c0:.4f},"
                  f"fade=t=out:st={total - FADE_OUT}:d={FADE_OUT},"
-                 "vignette=angle=PI/5,noise=alls=5:allf=t,"
+                 "vignette=angle=PI/5,noise=alls=3:allf=t,"
                  "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p[v]")
         cmd = [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", *inputs, "-i", str(wav),
                "-filter_complex", graph, "-map", "[v]", "-map", "3:a", "-map_metadata", "-1",
-               "-c:v", "libx264", "-preset", "slow", "-crf", "14",
+               "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-tune", "grain",
                "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
                "-af", f"afade=t=out:st={total - FADE_OUT}:d={FADE_OUT}",
                "-c:a", "aac", "-b:a", "320k", "-t", f"{total}", "-movflags", "+faststart", str(out)]

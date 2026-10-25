@@ -1138,11 +1138,14 @@ def shot_contain(pine):
     events = {}
     ground(O)
     road(O + Vector((0, -4.5, 0)), 160, 6)
+    road(O + Vector((0, 6.0, 0)), 160, 5)  # yazının arkasındaki uzak şerit
+    spot("lane_lamp", O + Vector((0.5, 4.0, 9)), O + Vector((0.5, 6.0, 0.5)), 9000, (0.8, 0.88, 1.0), 75, 0.9, 25,
+         shadow=True)
     fog(O + Vector((0, 15, 0)), (110, 80, 30), density=0.03)
-    forest(pine, O + Vector((0, 30, 0)), (55, 26), 200, [(-2, 5, -26, -22)], seed=3)
+    forest(pine, O + Vector((0, 30, 0)), (55, 26), 200, [(-2, 5, -26, -22), (-60, 60, -26.5, -20.5)], seed=3)
     txt = text3d("CONTAIN", "CONTAIN", O + Vector((1.3, 2.0, 1.25)), 0.85)
     spot("text_key", O + Vector((-4, -2, 6)), O + Vector((1.3, 2, 1.6)), 900, (0.75, 0.85, 1), 30, 0.7, 30)
-    spot("deep_glow", O + Vector((3, 9, 4)), O + Vector((-2, 40, 0)), 22000, (0.6, 0.72, 1.0), 60, 0.9, 80)
+    spot("deep_glow", O + Vector((3, 13, 5)), O + Vector((-2, 40, 0)), 22000, (0.6, 0.72, 1.0), 60, 0.9, 80)
     spot("road_glow", O + Vector((-30, -2, 6)), O + Vector((10, -4, 0)), 50000, (0.65, 0.75, 1.0), 40, 0.9, 90)
     spot("veh_rim", O + Vector((2, 3, 5)), O + Vector((0, -4.5, 1.5)), 6000, (0.7, 0.8, 1.0), 70, 0.9, 30)
     # Kamera tarafından araçların yanını yalayan ışık (yol lambası gibi): kamuflaj, paneller, yazı okunur.
@@ -1151,15 +1154,17 @@ def shot_contain(pine):
     spot("veh_key2", O + Vector((6.0, -10.5, 3.5)), O + Vector((0.5, -4.6, 1.2)), 5000, (1.0, 0.85, 0.65), 40, 0.9, 25)
 
     # Konvoy: iki zırhlı araç arka arkaya geçer; aralarından ve sonra yazı görünür.
+    # Konvoy: ilk araç kameranın dibinden geçip yazıyı bir an örter (referanstaki silme), ikinci
+    # araç yazının arkasındaki uzak şeritten geçer; yazı planın büyük kısmında okunur kalır.
     v, x_c = 10.0, 0.6  # 36 km/sa: ağır ve okunur bir geçiş
-    events["apc_pass"], events["apc_speed"] = [], v
-    for i, f_mid in enumerate((214, 274)):
+    lanes = ((-4.5, 196), (6.0, 262))
+    events["apc_pass"], events["apc_speed"], events["apc_lanes"] = [], v, [y for y, _ in lanes]
+    for y, f_mid in lanes:
         apc = asset("apc", proxy_apc)
-        apc.location = O + Vector((0, -4.5 - 0.15 * i, 0.02))
+        apc.location = O + Vector((0, y, 0.02))
         drive(apc, [(r0, O.x + x_c + v * (r0 - f_mid) / FPS), (r1, O.x + x_c + v * (r1 - f_mid) / FPS)])
         rig_vehicle(apc, 2600)
-        if i == 0:
-            beacon_lights(apc, r0, r1)
+        beacon_lights(apc, r0, r1)
         events["apc_pass"].append(frame_time(f_mid))
     # Derinlik: kameranın dibinde bulanık otlar, yolda toz, ormanda uzak ışıklar.
     weeds("weeds_l", O + Vector((-0.75, -8.75, 0)), 70, 21, (0.45, 1.0), 0.28)
@@ -1182,8 +1187,8 @@ def shot_contain(pine):
             o.data.use_shadow = True
     d_text = (txt.location + Vector((0, 0, 0.3)) - cpos).length
     d_veh = 5.6
-    focus_track(cam, r0, r1, lambda f: d_text + (d_veh - d_text) * smoothstep((f - 188) / 12)
-                * (1 - smoothstep((f - 290) / 12)))
+    focus_track(cam, r0, r1, lambda f: d_text + (d_veh - d_text) * smoothstep((f - 172) / 10)
+                * (1 - smoothstep((f - 222) / 10)))
     return cam, events
 
 
