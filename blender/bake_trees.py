@@ -34,7 +34,10 @@ def main():
     else:
         bpy.ops.wm.read_factory_settings(use_empty=True)
         bpy.ops.import_scene.gltf(filepath=str(next(SRC.glob("*.gltf"))))
-    meshes = [o for o in bpy.data.objects if o.type == "MESH" and o.visible_get()]
+    visible = [o for o in bpy.data.objects if o.type == "MESH" and o.visible_get()]
+    # .blend'de her ağacın üç detay seviyesi üst üste durur; en detaylısı (LOD0) pişirilir.
+    lod0 = [o for o in visible if o.name.endswith("_LOD0")]
+    meshes = lod0 or visible
     s = bpy.context.scene
     s.render.engine = "BLENDER_EEVEE_NEXT"
     s.eevee.taa_render_samples = 16
@@ -57,7 +60,7 @@ def main():
     trees = []
     # Dosyada yan yana birkaç ağaç var: her biri ayrı impostor olur.
     for v, tree in enumerate(sorted(meshes, key=lambda o: o.matrix_world.translation.x)):
-        for o in meshes:
+        for o in visible:
             o.hide_render = o is not tree
         pts = [tree.matrix_world @ Vector(c) for c in tree.bound_box]
         lo = Vector([min(p[i] for p in pts) for i in range(3)])

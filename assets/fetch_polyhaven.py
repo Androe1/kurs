@@ -16,11 +16,18 @@ BASE = "https://dl.polyhaven.org/file/ph-assets/Models"
 UA = {"User-Agent": "kurs-scp-cinematic/1.0 (Blender sahne kurulumu)"}
 OUT = Path(__file__).resolve().parent / "models" / "polyhaven"
 
+# Göknar: glTF içe aktarımı ~30 dk sürdüğü için Blender dosyası (+ PNG dokuları) indirilir;
+# blender/bake_trees.py bunu çapraz düzlemli impostorlara pişirir.
+TREE = "fir_tree_01"
+TREE_TEX = ["bark_diff", "bark_disp", "bark_nor_gl", "bark_rough", "twig_alpha", "twig_diff", "twig_mask",
+            "twig_nor_gl", "twig_rough"] + [f"trunk_{c}_{m}" for c in "abc" for m in ("diff", "nor_gl", "rough")]
+
+
 MODELS = [
     "wooden_military_crate", "old_military_crate", "ammo_box", "bolt_action_rifle_7_62",
     "metal_jerrycan_green", "portable_generator", "hanging_industrial_lamp",
-    "tree_stump_01", "dead_tree_trunk",  # (fir/pine_tree_01 ~1 GB; ağaçlar prosedürel)
-    "concrete_road_barrier", "modular_chainlink_fence",
+    "tree_stump_01", "dead_tree_trunk",
+    "concrete_road_barrier", "modular_chainlink_fence", TREE,
 ]
 
 
@@ -46,6 +53,15 @@ def fetch(asset, res):
     return len(uris)
 
 
+def fetch_tree(res="1k"):
+    d = OUT / TREE
+    get(f"{BASE}/blend/{res}/{TREE}/{TREE}_{res}.blend", d / f"{TREE}_{res}.blend")
+    for t in TREE_TEX:
+        name = f"{TREE}_{t}_{res}.png"
+        get(f"{BASE}/png/{res}/{TREE}/{name}", d / "textures" / name)
+    return 1 + len(TREE_TEX)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--res", default="2k", choices=["1k", "2k", "4k"])
@@ -54,7 +70,7 @@ def main():
     failed = []
     for m in a.models:
         try:
-            n = fetch(m, a.res)
+            n = fetch_tree() if m == TREE else fetch(m, a.res)
             print(f"ok   {m} ({n} dosya)")
         except Exception as e:  # noqa: BLE001 - tek modelin hatası diğerlerini durdurmasın
             print(f"HATA {m}: {e}")
