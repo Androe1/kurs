@@ -1175,6 +1175,11 @@ def shot_contain(pine):
         u = (f - f0) / (f1 - f0)
         key(cam, f, rot=look_rot(cpos, O + Vector((-0.6 + 2.5 * u, 2, 1.75 + 0.05 * u))), interp="LINEAR")
     handheld(cam, 0.9)
+    # Bu planda tüm spotlar gölgeli: yoksa arkadaki aracın farları ve yol ışığı öndeki aracın
+    # gövdesinden geçip etrafındaki sisi aydınlatır, araç süt beyazı bir perdede kalır.
+    for o in bpy.data.objects:
+        if o.type == "LIGHT" and o.data.type == "SPOT":
+            o.data.use_shadow = True
     d_text = (txt.location + Vector((0, 0, 0.3)) - cpos).length
     d_veh = 5.6
     focus_track(cam, r0, r1, lambda f: d_text + (d_veh - d_text) * smoothstep((f - 188) / 12)
