@@ -165,12 +165,16 @@ class Builder:
 
 
 def spot(name, loc, target, power, color=(1, 1, 1), size=40, blend=0.4, dist=90, parent=None,
-         volume=1.0, shadow=True):
+         volume=1.0, shadow=False):
+    """Spot ışık. Gölge yalnızca görüntüde fark edilen anahtar ışıklarda açılır: işlemciyle çalışan
+    EEVEE'de gölge haritaları kare süresinin büyük kısmını yer (ölçüm: 431 sn -> 75 sn)."""
     d = bpy.data.lights.new(name, "SPOT")
     d.energy, d.color = power, color
     d.spot_size, d.spot_blend = math.radians(size), blend
     d.use_custom_distance, d.cutoff_distance = True, dist
     d.volume_factor, d.use_shadow = volume, shadow
+    if hasattr(d, "shadow_resolution_limit"):
+        d.shadow_resolution_limit = 0.004
     o = link(bpy.data.objects.new(name, d), parent)
     o.location = loc
     if target is not None:
@@ -182,6 +186,7 @@ def point(name, loc, power, color, radius=0.05, dist=40, parent=None):
     d = bpy.data.lights.new(name, "POINT")
     d.energy, d.color, d.shadow_soft_size = power, color, radius
     d.use_custom_distance, d.cutoff_distance = True, dist
+    d.use_shadow = False  # nokta ışıklar (bokeh, ampul parıltısı) gölgesiz: küp gölge haritaları çok pahalı
     o = link(bpy.data.objects.new(name, d), parent)
     o.location = loc
     return o
@@ -1070,7 +1075,7 @@ def shot_secure(pine):
     lamp = O + Vector((1.25, -0.9, 2.75))
     place("hang_lamp", lamp)
     spot("work_light", lamp - Vector((0, 0, 0.06)), O + Vector((0.2, -0.4, 0)), 3500, (1, 0.86, 0.66), 110,
-         0.8, 25)
+         0.8, 25, shadow=True)
     point("lamp_bulb", lamp + Vector((0, 0, 0.1)), 20, (1, 0.85, 0.65), 0.04, 6)
     spot("fg_fill", O + Vector((1.8, -6.4, 2.2)), O + Vector((0, -4.7, 1.0)), 160, (1, 0.85, 0.65), 40, 0.8, 6)
     spot("backlight", O + Vector((1.5, 24, 5)), O + Vector((0, -6, 1.2)), 22000, (0.78, 0.86, 1.0), 70, 0.9,
@@ -1141,7 +1146,8 @@ def shot_contain(pine):
     spot("road_glow", O + Vector((-30, -2, 6)), O + Vector((10, -4, 0)), 50000, (0.65, 0.75, 1.0), 40, 0.9, 90)
     spot("veh_rim", O + Vector((2, 3, 5)), O + Vector((0, -4.5, 1.5)), 6000, (0.7, 0.8, 1.0), 70, 0.9, 30)
     # Kamera tarafından araçların yanını yalayan ışık (yol lambası gibi): kamuflaj, paneller, yazı okunur.
-    spot("veh_key", O + Vector((-4.5, -11, 4.5)), O + Vector((1.0, -4.6, 1.3)), 9000, (0.85, 0.9, 1.0), 45, 0.9, 25)
+    spot("veh_key", O + Vector((-4.5, -11, 4.5)), O + Vector((1.0, -4.6, 1.3)), 9000, (0.85, 0.9, 1.0), 45, 0.9, 25,
+         shadow=True)
     spot("veh_key2", O + Vector((6.0, -10.5, 3.5)), O + Vector((0.5, -4.6, 1.2)), 5000, (1.0, 0.85, 0.65), 40, 0.9, 25)
 
     # Konvoy: iki zırhlı araç arka arkaya geçer; aralarından ve sonra yazı görünür.
@@ -1228,7 +1234,7 @@ def shot_protect(pine):
     emblem(O + Vector((0, W - 0.75, 6.6)), 1.35)
     for x in (-6.5, 6.5):
         spot("flood", O + Vector((x, W - 2.1, 8.9)), O + Vector((x * 0.3, 8, 0)), 5000,
-             (0.85, 0.92, 1), 55, 0.5, 80)
+             (0.85, 0.92, 1), 55, 0.5, 80, shadow=True)
     spot("emblem_key", O + Vector((0, W - 6, 2)), O + Vector((0, W - 0.75, 6.6)), 1500, (1, 1, 1), 30, 0.5, 20)
     # Gözetleme kulesi ve dönen arama ışığı.
     tw = Builder()
@@ -1335,6 +1341,7 @@ def setup_scene(preview):
     s.world = w
     moon = bpy.data.lights.new("moon", "SUN")
     moon.energy, moon.color, moon.angle = 0.1, (0.6, 0.7, 1.0), 0.02
+    moon.use_shadow = False  # çok zayıf; tüm sahneyi kapsayan güneş gölgesi pahalı
     mo = link(bpy.data.objects.new("moon", moon))
     mo.rotation_euler = (math.radians(55), 0, math.radians(160))
     # Bloom: kompozitörde Fog Glow.
