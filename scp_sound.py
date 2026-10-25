@@ -490,11 +490,11 @@ def synthesize(ev, seed=13):
     for i, t_mid in enumerate(ev["apc_pass"]):
         t_start = c2 - 0.9
         n_dur = end - t_start
-        eng = diesel(rng, n_dur, 1650 + 140 * i)
-        tyr = tires_gravel(rng, n_dur)
+        eng = diesel(rng, n_dur, 1500 + 140 * i)
+        tyr = tires_gravel(rng, n_dur, ev.get("apc_speed", VEH_SPEED))
         rat = rattles(rng, n_dur, 6)
         src = eng * 0.9 + tyr * 0.55 + rat * 0.35
-        st = pass_by(src, t_mid, VEH_X_MID, VEH_SPEED, VEH_Y - 0.15 * i, 1.1, t_start)
+        st = pass_by(src, t_mid, VEH_X_MID, ev.get("apc_speed", VEH_SPEED), VEH_Y - 0.15 * i, 1.1, t_start)
         fade = np.clip((tt(n_dur) - 0.3) / 0.6, 0, 1) * np.clip((c3 + 0.6 - (t_start + tt(n_dur))) / 0.5, 0, 1)
         mx.add(st * fade[:, None], t_start, 0.75, room=0.25)
         # geçişin dibinde hava kütlesi: kısa, alçak whoosh

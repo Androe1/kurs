@@ -399,7 +399,7 @@ def make_materials():
     M["emblem"] = material("emblem", (0.75, 0.75, 0.75), 0.35, 0.6, emit=(1, 1, 1), strength=0.4)
     M["ground"] = ground_material()
     M["road"] = material("road", (0.025, 0.024, 0.022), 0.35)
-    M["dust"] = material("dust", (0.9, 0.88, 0.82), 0.5, emit=(1, 0.95, 0.85), strength=1.5)
+    M["dust"] = material("dust", (0.9, 0.88, 0.82), 0.5, emit=(1, 0.95, 0.85), strength=0.5)
     M["weed"] = weed_material()
     M["crate"] = material("crate_wood", (0.06, 0.07, 0.04), 0.8)
     M["stencil"] = material("stencil", (0.55, 0.45, 0.08), 0.7)
@@ -1078,7 +1078,7 @@ def shot_secure(pine):
     spot("backlight_hi", O + Vector((-8, 40, 14)), O + Vector((0, 0, 0)), 25000, (0.7, 0.8, 1.0), 35, 0.8, 90)
     txt = text3d("SECURE", "SECURE", O + Vector((0, 0.2, 1.5)), 0.66, reveal=True)
     # Derinlik: huzmelerde toz, ormanın içinde uzak ışıklar (bokeh).
-    dust("dust_secure", O + Vector((0.6, -1.8, 1.7)), (6.5, 6, 3.2), 420, 11, r0, r1)
+    dust("dust_secure", O + Vector((0.6, -1.8, 1.7)), (6.5, 6, 3.2), 300, 11, r0, r1)
     for loc, col, pw in (((-9, 21, 2.0), (1, 0.75, 0.45), 25), ((7.5, 27, 3.2), (0.75, 0.85, 1), 30),
                          ((-3.5, 34, 1.7), (1, 0.6, 0.25), 25), ((12, 19, 1.4), (0.8, 0.9, 1), 20)):
         bokeh_light(O + Vector(loc), col, pw)
@@ -1145,9 +1145,9 @@ def shot_contain(pine):
     spot("veh_key2", O + Vector((6.0, -10.5, 3.5)), O + Vector((0.5, -4.6, 1.2)), 5000, (1.0, 0.85, 0.65), 40, 0.9, 25)
 
     # Konvoy: iki zırhlı araç arka arkaya geçer; aralarından ve sonra yazı görünür.
-    v, x_c = 14.0, 0.6
-    events["apc_pass"] = []
-    for i, f_mid in enumerate((222, 268)):
+    v, x_c = 10.0, 0.6  # 36 km/sa: ağır ve okunur bir geçiş
+    events["apc_pass"], events["apc_speed"] = [], v
+    for i, f_mid in enumerate((214, 274)):
         apc = asset("apc", proxy_apc)
         apc.location = O + Vector((0, -4.5 - 0.15 * i, 0.02))
         drive(apc, [(r0, O.x + x_c + v * (r0 - f_mid) / FPS), (r1, O.x + x_c + v * (r1 - f_mid) / FPS)])
@@ -1158,7 +1158,7 @@ def shot_contain(pine):
     # Derinlik: kameranın dibinde bulanık otlar, yolda toz, ormanda uzak ışıklar.
     weeds("weeds_l", O + Vector((-0.75, -8.75, 0)), 70, 21, (0.45, 1.0), 0.28)
     weeds("weeds_r", O + Vector((1.05, -8.6, 0)), 50, 22, (0.4, 0.85), 0.22)
-    dust("dust_contain", O + Vector((0.5, -5.5, 1.4)), (14, 7, 2.8), 500, 12, r0, r1, drift=(0.25, 0.05, 0.0))
+    dust("dust_contain", O + Vector((0.5, -5.5, 1.4)), (14, 7, 2.8), 260, 12, r0, r1, drift=(0.25, 0.05, 0.0))
     for loc, col, pw in (((-7, 19, 2.2), (1, 0.7, 0.4), 30), ((9, 24, 3.0), (0.75, 0.85, 1), 35),
                          ((-14, 28, 1.6), (0.8, 0.9, 1), 25), ((4.5, 31, 4.5), (1, 0.15, 0.08), 20)):
         bokeh_light(O + Vector(loc), col, pw)
@@ -1171,8 +1171,8 @@ def shot_contain(pine):
     handheld(cam, 0.9)
     d_text = (txt.location + Vector((0, 0, 0.3)) - cpos).length
     d_veh = 5.6
-    focus_track(cam, r0, r1, lambda f: d_text + (d_veh - d_text) * smoothstep((f - 200) / 12)
-                * (1 - smoothstep((f - 278) / 12)))
+    focus_track(cam, r0, r1, lambda f: d_text + (d_veh - d_text) * smoothstep((f - 188) / 12)
+                * (1 - smoothstep((f - 290) / 12)))
     return cam, events
 
 
@@ -1268,7 +1268,7 @@ def shot_protect(pine):
     # Derinlik: yol kenarında otlar, kameranın önünde toz.
     for k, (x, y) in enumerate(((-3.1, 0.5), (2.9, -0.4), (-4.2, 5.0), (4.0, 6.5))):
         weeds(f"weeds_p{k}", O + Vector((x, y, 0)), 45, 30 + k, (0.4, 0.9), 0.35)
-    dust("dust_protect", O + Vector((0.3, 4.5, 2.0)), (7, 14, 4), 520, 13, r0, r1, drift=(0.03, -0.1, 0.02))
+    dust("dust_protect", O + Vector((0.3, 4.5, 2.0)), (7, 14, 4), 320, 13, r0, r1, drift=(0.03, -0.1, 0.02))
 
     p0, p1 = O + Vector((-0.2, -2.0, 2.45)), O + Vector((0.9, 9.0, 1.55))
     t0, t1 = O + Vector((-0.1, 1.5, 2.3)), O + Vector((0, W - 0.75, 6.2))
@@ -1317,7 +1317,7 @@ def setup_scene(preview):
     if hasattr(e, "bokeh_max_size"):
         e.bokeh_max_size = 60
     s.render.use_motion_blur = not preview
-    s.render.motion_blur_shutter = 0.5
+    s.render.motion_blur_shutter = 0.7  # 30 fps çıktıda ~125° obtüratör
     s.render.resolution_x, s.render.resolution_y = (640, 360) if preview else (1920, 1080)
     s.render.resolution_percentage = 100
     s.render.film_transparent = False
