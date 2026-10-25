@@ -3,3 +3,4 @@ skia-python>=87.5
 imageio-ffmpeg>=0.4.9
 moderngl
 scipy>=1.10
+pillow>=10.0

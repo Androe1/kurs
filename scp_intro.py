@@ -13,7 +13,7 @@ Kurgu (60 fps, kare n -> t = n/60 sn; Blender karesi = n + 1):
     3.6 - 6.8   yol           CONTAIN
     6.8         8 karelik siyaha karartma (en koyu an vuruşta)
     6.8 - 9.2   tesis         PROTECT
-    9.2         sert kesme, en büyük vuruş: SCP logosu + oyun logosu
+    9.2         sert kesme, en büyük vuruş: oyun logosu (tam ortada)
     9.2 - 12.0  logo kartı (2.2 sn sabit), son 0.6 sn'de kararır
 
 Yazılar render'dan sonra en üst katmanda çizilir (hiçbir nesne önüne geçemez): aynı yazı tipi,
@@ -31,7 +31,6 @@ import imageio_ffmpeg
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-import scp_logo
 from scp_sound import synthesize
 from sound import write_wav
 
@@ -51,9 +50,7 @@ WORDS = (("SECURE", 0.90, 3.00), ("CONTAIN", 4.00, 6.20), ("PROTECT", 7.00, 8.85
 TEXT_FADE, TEXT_SCALE0 = 0.3, 1.05
 CAP_FRAC = 0.09                  # büyük harf yüksekliği / kare yüksekliği
 TRACK = 0.30                     # harf aralığı (em)
-LOGO_FRAC = 0.34                 # SCP logosu çapı / kare yüksekliği (en az %30)
-LOGO_CY = 0.385                  # SCP logosu merkezinin dikey konumu (kare yüksekliği oranı)
-GAME_FRAC = 0.27                 # oyun logosu yüksekliği / kare yüksekliği
+LOGO_FRAC = 0.46                 # oyun logosu yüksekliği / kare yüksekliği (en az %30), tam ortada
 
 
 def ease_out(u):
@@ -138,28 +135,6 @@ class TextLayer:
         return img * (1 - op * a[..., None]) + white * (op * a[..., None])
 
 
-def scp_logo_mask(diameter, ss=4):
-    """scp_logo vektöründen kenar yumuşatmalı alfa maskesi (ss kat süper örnekleme)."""
-    D = int(round(diameter * ss))
-    pad = 4 * ss
-    size = D + 2 * pad
-    img = Image.new("L", (size, size), 0)
-    d = ImageDraw.Draw(img)
-    c, R = size / 2, D / 2
-
-    def px(pt):
-        return (c + pt[0] * R, c - pt[1] * R)
-
-    shp = scp_logo.shapes()
-    for poly in shp["polygons"]:
-        d.polygon([px(p) for p in poly], fill=255)
-    r_in, r_out = shp["inner_ring"]
-    d.ellipse([c - r_out * R, c - r_out * R, c + r_out * R, c + r_out * R], fill=255)
-    d.ellipse([c - r_in * R, c - r_in * R, c + r_in * R, c + r_in * R], fill=0)
-    n = size // ss
-    return img.resize((n, n), Image.LANCZOS)
-
-
 def game_logo_rgba(height):
     """Kullanıcının oyun logosu: görünür içerik sınırına kırpılır, yüksekliğe ölçeklenir."""
     im = Image.open(GAME_LOGO).convert("RGBA")
@@ -174,40 +149,28 @@ def game_logo_rgba(height):
 
 
 class LogoCard:
-    """Final kartı: siyah zemin, ortada temiz SCP logosu, altında oyun logosu."""
+    """Final kartı: siyah zemin, tam ortada oyun logosu (kare yüksekliğinin %46'sı)."""
 
     def __init__(self):
-        base = np.zeros((H, W, 3), np.float32)
         yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
-        r = np.hypot((xx - W / 2) / (0.6 * W), (yy - LOGO_CY * H) / (0.6 * H))
-        base += (0.035 * np.exp(-r ** 2 * 2.2))[..., None] * np.array([0.8, 0.85, 1.0], np.float32)
-        d = LOGO_FRAC * H
-        m = scp_logo_mask(d)
-        self.logo = np.zeros((H, W), np.float32)
-        x0, y0 = (W - m.width) // 2, int(round(LOGO_CY * H - m.height / 2))
-        self.logo[y0:y0 + m.height, x0:x0 + m.width] = np.asarray(m, np.float32) / 255.0
-        glow = Image.fromarray((self.logo * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(26))
+        r = np.hypot((xx - W / 2) / (0.6 * W), (yy - H / 2) / (0.6 * H))
+        self.base = (0.03 * np.exp(-r ** 2 * 2.2))[..., None] * np.array([1.0, 0.92, 0.78], np.float32)
+        g = game_logo_rgba(LOGO_FRAC * H)
+        x0, y0 = (W - g.width) // 2, (H - g.height) // 2
+        self.logo = np.zeros((H, W, 4), np.float32)
+        self.logo[y0:y0 + g.height, x0:x0 + g.width] = np.asarray(g, np.float32) / 255.0
+        lum = self.logo[..., :3].max(-1) * self.logo[..., 3]   # yalnızca altın kısımlar parlar
+        glow = Image.fromarray((np.clip(lum * 1.6, 0, 1) * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(30))
         self.glow = np.asarray(glow, np.float32) / 255.0
-        g = game_logo_rgba(GAME_FRAC * H)
-        top = int(round(LOGO_CY * H + d / 2 + 0.035 * H))
-        self.game = np.zeros((H, W, 4), np.float32)
-        gx = (W - g.width) // 2
-        self.game[top:top + g.height, gx:gx + g.width] = np.asarray(g, np.float32) / 255.0
-        self.base = base
-        self.bbox = {"scp": (x0, y0, x0 + m.width, y0 + m.height),
-                     "game": (gx, top, gx + g.width, top + g.height)}
+        self.bbox = (x0, y0, x0 + g.width, y0 + g.height)
 
     def render(self, t):
         u = t - CUT_LOGO
-        img = self.base.copy()
-        # vuruş anında kısa bir parlama; logonun kendisi ilk kareden itibaren sabit
-        flash = 0.55 * np.exp(-u / 0.12)
-        silver = np.array([0.93, 0.94, 0.95], np.float32)
-        a = self.logo[..., None]
-        img = img * (1 - a) + silver * a
-        img += (flash + 0.10) * self.glow[..., None] * np.array([0.85, 0.9, 1.0], np.float32)
-        ga = self.game[..., 3:]
-        img = img * (1 - ga) + self.game[..., :3] * ga
+        a = self.logo[..., 3:]
+        img = self.base * (1 - a) + self.logo[..., :3] * a
+        # vuruş anında kısa sıcak parlama; logonun kendisi ilk kareden itibaren sabit
+        flash = 0.45 * np.exp(-u / 0.12)
+        img = img + (flash + 0.12) * self.glow[..., None] * np.array([1.0, 0.78, 0.42], np.float32)
         fade = 1 - smooth((t - (END - FADE_OUT)) / FADE_OUT)
         return img * fade
 

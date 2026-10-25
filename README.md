@@ -130,39 +130,48 @@ Linux'ta sunucuda çalıştırmak için `libegl1` gerekir (ekran kartı gerekmez
 
 ---
 
-# SCP Sinematiği (7 saniye, Blender)
+# SCP Sinematiği (12 saniye, Blender)
 
-Referans: SCP: Roleplay videosunun 00:25-00:32 arası (siyah ekran + üç plan).
-Karakter yok; silah kasaları ve M4A1'ler, zırhlı araç konvoyu, sisli göknar ormanı, tesis kapısı.
+Referans: SCP: Roleplay videosunun 00:25-00:32 arası. Karakter yok; depo (silah kasaları, rafta
+M4A1'ler), gece yolunda zırhlı araç konvoyu, tesis kapısı ve oyun logosu.
 
-| Saniye    | Plan    | Görüntü                                                                     | Ses                                  |
-|-----------|---------|-----------------------------------------------------------------------------|--------------------------------------|
-| 0 - 1     | –       | siyah, siyahtan yumuşak açılış                                              | emme + ters yankı kabarması          |
-| 1 - 3     | SECURE  | sisli ormanda kasa deposu; ön plandaki kasa yığını kayarken yazı arkasından belirir; odak kasalardan yazıya kayar; kasaya dayalı M4A1'ler, asılı lamba, havada toz | trailer darbesi, kayan whoosh, metal tıngırtı, lamba vızıltısı, telsiz |
-| 3 - 5     | CONTAIN | alçak kamera, gece orman yolu; tepe lambası dönen 8x8 zırhlı araç kameranın dibinden geçip yazıyı bir an örter (odak araca kayar), ikinci araç yazının arkasındaki şeritten geçer; ön planda otlar | braam + darbe, dizel motorlar (ateşleme sırası, Doppler, sol->sağ; uzak araç kısık/boğuk), lastik/çakıl |
-| 5 - 7     | PROTECT | kamera harflerin altından geçip tesis kapısına ilerler; odak yazıdan ambleme kayar; çit, bariyer, kule, kamyonlar | darbe, harf whoosh'u, uzak siren, sonda büyük darbe |
+Hazır video: [`output/scp_cinematic.mp4`](output/scp_cinematic.mp4) (1920x1080, 16:9, 60 fps, H.264 + AAC)
 
-Planlar arası 0.33 sn çapraz geçiş: her plan kesmenin iki yanına 10 kare taşacak şekilde ayrı
-render edilir ve ffmpeg `xfade` ile birleşir; kamera ve araçlar geçiş boyunca hareketini sürdürür.
+| Saniye     | Görüntü                                                                                  | Ses |
+|------------|------------------------------------------------------------------------------------------|-----|
+| 0.0 - 0.4  | siyahtan hızlı açılış                                                                    | ters yankı kabarması -> açılış vuruşu (0.4) |
+| 0.4 - 3.6  | **SECURE** - tavanlı, duvarlı depo; kasalar zemine oturur, temas gölgeleri; rafta farklı açılarla yaslı 4 M4A1; lambalar kirişlere zincirle asılı; ön planda kenar ışıklı küçük kasa yığını (kadrajın %17'si) | oda tonu, lamba balastı vızıltısı, kapıdan rüzgâr, sub-bass vuruşları, alçak drone |
+| 3.6        | sert kesme                                                                               | vuruş + braam |
+| 3.6 - 6.8  | **CONTAIN** - alçak kamera yol kenarında; iki 8x8 zırhlı araç uzaktan farlarıyla yaklaşıp kameranın yanından geçer (gövde, tekerlek, kapak, cıvata, kir görünür; tekerlekler yola değer, hıza göre döner); direkli sokak lambaları; rüzgârda sallanan 3D otlar | iki dizel motor + lastik + tıngırtı, Doppler'li geçiş, rüzgâr |
+| 6.8        | 8 karelik siyaha karartma                                                                | vuruş |
+| 6.8 - 9.2  | **PROTECT** - kamera tesis kapısına ilerler; kapıdaki oyun logosu kadrajın üst üçte birinde | uzak alarm kornası, trafo vızıltısı, logoya doğru hızlanan sub nabzı |
+| 9.2 - 12.0 | sert kesme: tam ortada oyun logosu (kare yüksekliğinin %46'sı); 2.2 sn sabit, son 0.6 sn kararma | en büyük vuruş, >2 sn doğal yankı sönümü, son 0.5 sn fade-out |
+
+Yazılar render'dan sonra en üst katmanda çizilir: hepsi Montserrat SemiBold, büyük harf yüksekliği
+kare yüksekliğinin %9'u, tam merkez; 0.3 sn belirme + ölçek 1.05 -> 1.0, sabit bekleme, 0.3 sn
+kaybolma, hafif gölge. Her kelime en az 1.5 sn tam okunur, iki kelime hiçbir karede birlikte yok.
 
 ```bash
 python3.11 -m pip install bpy==4.2.0 scipy        # Blender Python modülü (Python 3.11)
-pip install -r requirements.txt                   # numpy, scipy, imageio-ffmpeg (ses + birleştirme)
+pip install -r requirements.txt                   # numpy, scipy, pillow, imageio-ffmpeg
 python assets/fetch_polyhaven.py                  # Poly Haven modelleri (CC0) + göknar .blend
 python3.11 blender/bake_trees.py                  # göknarları impostor görüntülerine pişir (bir kez)
-python3.11 blender/render_chunks.py --preview --step 2   # önizleme kareleri (640x360)
-python scp_intro.py --preview                     # output/taslak/scp_onizleme.mp4
-python3.11 blender/render_chunks.py               # final kareler (1920x1080), kaldığı yerden sürer
+python3.11 blender/scp_cinematic.py --check       # sahneleri kur, kontrolleri yazdır (zemin, kamera, kaplama)
+python3.11 blender/render_chunks.py --step 2 --jobs 2   # final kareler (1920x1080, 30 fps render)
 python scp_intro.py                               # output/scp_cinematic.mp4
-python3.11 blender/scp_cinematic.py --preview --still 72,232,405   # tek tek kareler
+python scp_check.py                               # output/kontrol/: 0.25 sn kareler, spektrogram, rapor
+python3.11 blender/scp_cinematic.py --preview --still 110,300,480   # tek tek önizleme kareleri
 ```
 
-- `blender/scp_cinematic.py` - sahne, ışık, sis, kamera, odak kaydırma, toz/bokeh, render (headless bpy)
-- `blender/vehicles.py` - prosedürel 8x8 zırhlı araç ve 6x6 askerî kamyon (gerçek ölçüler, kamuflaj + çamur)
-- `blender/bake_trees.py` - Poly Haven fir_tree_01'in üç ağacını çapraz düzlemli impostora pişirir
+- `blender/scp_cinematic.py` - sahne, ışık, sis, kamera, odak, 3D çimen, render (headless bpy);
+  nesneleri ışın atarak altlarındaki yüzeye oturtur ve kontrol eder (havada nesne, kamera-nesne
+  çakışması, ön plan kaplaması), sonuçlar `meta.json`'a yazılır
+- `blender/vehicles.py` - prosedürel 8x8 zırhlı araç ve 6x6 askerî kamyon
 - `blender/render_chunks.py` - planları küçük gruplar halinde ayrı işlemlerde render eder (bellek)
-- `scp_sound.py` - ses tasarımı: dizel motor + Doppler'li geçiş, trailer darbeleri, braam, ortam,
-  ducking, kompresör/limiter (numpy + scipy ile sentez; zamanlar `meta.json`'dan)
-- `scp_intro.py` - siyah giriş, çapraz geçişler, kararma, vinyet, film greni, ses -> MP4
+- `scp_intro.py` - kesmeler/karartma, renk, vinyet, gren, 2D yazılar ve logo kartı, ses -> MP4
+- `scp_sound.py` - ses tasarımı (numpy + scipy ile sentez): her parçada 6/8 ms yumuşatma,
+  BS.1770-4 ile -14 LUFS, 4x aşırı örneklemeli true-peak limiter (-1.5 dBTP)
+- `scp_check.py` - son kontrol: her 0.25 sn'de kare, spektrogram, ebur128, tık taraması
+- `assets/brand/game_logo.png` - oyun logosu (final kartında ve tesis kapısında)
 - `assets/models/` - dış modeller (bkz. `assets/models/README.md`, `CREDITS.md`); M4A1: Lolik123654
   (Sketchfab, CC BY 4.0) - videoyu paylaşırken açıklamaya yazılmalı

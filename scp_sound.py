@@ -408,8 +408,9 @@ def diesel(rng, dur, rpm, cyl=6, load=0.8):
     ex = lp(ex, 1700)
     body = peak_eq(peak_eq(peak_eq(peak_eq(ex, 95, 5, 1.2), 230, 4, 1.5), 520, 5, 1.6), 1100, 4, 1.4)
     rumble = lp(brown(n, rng), 120) * (0.6 + 0.4 * lp(gas, 30) / (np.max(np.abs(gas)) + 1e-9))
-    clatter = bp(signal.fftconvolve(knocks, rng.standard_normal(int(0.002 * SR)) * np.exp(-tt(0.002) / 0.0006))[:n],
-                 1800, 7000)
+    kt = tt(0.004)  # dizel tıkırtısı: 0.4 ms yükselişli kısa gürültü tanesi (anlık sıçrama yok)
+    grain = rng.standard_normal(len(kt)) * (1 - np.exp(-kt / 0.0004)) * np.exp(-kt / 0.0012)
+    clatter = bp(signal.fftconvolve(knocks, grain)[:n], 1600, 5200)
     turbo = bp(rng.standard_normal(n), 2900, 3400, 2) * (0.5 + 0.5 * np.sin(TAU * 0.3 * t))  # dar bant ıslık
     intake = bp(rng.standard_normal(n), 900, 2600)
     mix = (norm(body) * 1.0 + norm(rumble) * 0.45 * load + norm(clatter) * 0.4 + norm(turbo) * 0.04

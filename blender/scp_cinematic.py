@@ -9,8 +9,8 @@ Kurgu (t = final videodaki saniye; yazılar ve logo scp_intro.py'de 2D katman ol
 
   kare   1-216  (0.0-3.6)  SECURE  - tavanlı depo: kasalar, silah rafında M4A1'ler, kirişe asılı
                                      lamba, kapıdan giren projektör huzmesi; kamera yavaşça kayar
-  kare 217-408  (3.6-6.8)  CONTAIN - gece orman yolu, iki 8x8 zırhlı araç önden geçer
-  kare 409-552  (6.8-9.2)  PROTECT - kamera tesis kapısına ve SCP amblemine yaklaşır
+  kare 217-408  (3.6-6.8)  CONTAIN - gece orman yolu, iki 8x8 zırhlı araç yaklaşıp kameranın yanından geçer
+  kare 409-552  (6.8-9.2)  PROTECT - kamera tesis kapısına ve kapıdaki oyun logosuna yaklaşır
 
 Kurulumdan sonra kontroller yazdırılır ve meta.json'a yazılır: zemine oturma (ışın atışıyla),
 ön plan nesnesinin kadraj kaplaması, kameranın bir objenin içine girip girmediği.
@@ -28,19 +28,19 @@ from pathlib import Path
 
 import bpy  # noqa: I001  (bmesh, bpy'den sonra yüklenebilir)
 import bmesh
+import numpy as np
 from mathutils import Euler, Matrix, Vector
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import vehicles  # noqa: E402
-sys.path.insert(0, str(ROOT))
-import scp_logo  # noqa: E402
 ASSETS = ROOT / "assets" / "models"
+GAME_LOGO = ROOT / "assets" / "brand" / "game_logo.png"  # tesis kapısındaki oyun logosu
 FONT = ROOT / "fonts" / "Inter-Light.otf"
 
 FPS = 60
 # Blender karesi f <-> final videoda t = (f - 1) / 60 sn. Planlar sert kesme / siyaha karartma ile
-# ayrılır (taşma yok); 9.2-12.0 sn SCP logosu scp_intro.py'de 2D çizilir.
+# ayrılır (taşma yok); 9.2-12.0 sn oyun logosu kartı scp_intro.py'de 2D çizilir.
 F_START, F_END = 1, 552
 SHOTS = {  # ad: (ilk kare, son kare, sahnenin dünya ofseti)
     "secure": (1, 216, Vector((0, 0, 0))),       # 0.0-3.6 sn  depo
@@ -429,8 +429,8 @@ def make_materials():
     M["steel"] = material("steel", (0.12, 0.12, 0.13), 0.4, 0.8)
     M["hazard"] = material("hazard", (0.6, 0.45, 0.02), 0.6)
     M["wire"] = material("wire", (0.2, 0.2, 0.2), 0.35, 0.9)
-    M["emblem"] = material("emblem", (0.78, 0.78, 0.76), 0.3, 0.85, emit=(1, 1, 1), strength=0.25)
-    M["emblem_plate"] = material("emblem_plate", (0.05, 0.05, 0.055), 0.5, 0.6)
+    M["game_logo"] = logo_material()
+    M["sign_plate"] = material("sign_plate", (0.03, 0.031, 0.034), 0.5, 0.5)
     M["ground"] = ground_material()
     M["road"] = material("road", (0.025, 0.024, 0.022), 0.35)
     M["dust"] = material("dust", (0.8, 0.78, 0.72), 0.5)  # ışık yok: yalnızca huzmelerde görünür
@@ -899,20 +899,66 @@ def fog(center, size, density=0.05, ground_boost=3.0, color=(0.75, 0.82, 1.0)):
     return o
 
 
-def emblem(loc, radius, depth=0.09, parent=None):
-    """Tesis kapısındaki SCP amblemi: scp_logo'daki aynı vektör (120° aralıklı üç halka parçası,
-    merkeze bakan üç eş ok, iç halka) XZ düzleminde ekstrüde edilir; ön yüz -Y'ye bakar."""
-    shp = scp_logo.shapes()
-    b = Builder()
-    for poly in shp["polygons"]:
-        b.prism([(x * radius, y * radius) for x, y in poly], depth, M["emblem"])
-    r_in, r_out = shp["inner_ring"]
-    b.ring(r_in * radius, r_out * radius, depth, M["emblem"])
-    b.box((2.2 * radius, 0.05, 2.2 * radius), (0, depth / 2 + 0.03, 0), M["emblem_plate"])  # arka plaka
-    o = b.build("emblem", bevel=0.004)
+def logo_crop(img, thresh=12 / 255):
+    """Logonun görünür kısmının UV kutusu (u0, v0, u1, v1); gölgesi için %4 pay."""
+    w, h = img.size
+    px = np.empty(w * h * 4, np.float32)
+    img.pixels.foreach_get(px)
+    px = px.reshape(h, w, 4)  # satır 0 = görüntünün altı
+    ys, xs = np.nonzero((px[..., :3].max(-1) > thresh) & (px[..., 3] > 0.03))
+    m = 0.04 * (ys.max() - ys.min())
+    return (max(xs.min() - m, 0) / w, max(ys.min() - m, 0) / h, min(xs.max() + m, w) / w, min(ys.max() + m, h) / h)
+
+
+def logo_material():
+    """Oyun logosu: altın kısımlar metalik, koyu dolgu mat; alfa ile kesilir; gece de okunsun diye
+    çok hafif kendi ışığı."""
+    m = bpy.data.materials.new("game_logo")
+    m.use_nodes = True
+    nt = m.node_tree
+    p = nt.nodes["Principled BSDF"]
+    tex = nt.nodes.new("ShaderNodeTexImage")
+    tex.image = bpy.data.images.load(str(GAME_LOGO), check_existing=True)
+    tex.interpolation = "Cubic"
+    tex.extension = "CLIP"
+    nt.links.new(tex.outputs["Color"], p.inputs["Base Color"])
+    nt.links.new(tex.outputs["Alpha"], p.inputs["Alpha"])
+    bw = nt.nodes.new("ShaderNodeRGBToBW")
+    nt.links.new(tex.outputs["Color"], bw.inputs["Color"])
+    mr = nt.nodes.new("ShaderNodeMapRange")  # parlak (altın) kısımlar metal, koyu dolgu değil
+    mr.inputs["From Min"].default_value, mr.inputs["From Max"].default_value = 0.08, 0.25
+    nt.links.new(bw.outputs["Val"], mr.inputs["Value"])
+    nt.links.new(mr.outputs["Result"], p.inputs["Metallic"])
+    p.inputs["Roughness"].default_value = 0.38
+    nt.links.new(tex.outputs["Color"], p.inputs["Emission Color"])
+    p.inputs["Emission Strength"].default_value = 0.9
+    if hasattr(m, "surface_render_method"):
+        m.surface_render_method = "DITHERED"
+    return m
+
+
+def logo_plate(loc, height):
+    """Kapıdaki oyun logosu: logonun görünür kısmına kırpılmış dikey levha (XZ düzlemi, ön yüz -Y)."""
+    img = bpy.data.images.load(str(GAME_LOGO), check_existing=True)
+    u0, v0, u1, v1 = logo_crop(img)
+    w = height * (u1 - u0) * img.size[0] / ((v1 - v0) * img.size[1])
+    me = bpy.data.meshes.new("game_logo")
+    me.from_pydata([(-w / 2, 0, -height / 2), (w / 2, 0, -height / 2), (w / 2, 0, height / 2),
+                    (-w / 2, 0, height / 2)], [], [(0, 1, 2, 3)])
+    uv = me.uv_layers.new(name="UVMap")
+    for loop, co in zip(me.loops, ((u0, v0), (u1, v0), (u1, v1), (u0, v1))):
+        uv.data[loop.index].uv = co
+    me.materials.append(M["game_logo"])
+    o = link(bpy.data.objects.new("game_logo", me))
     o.location = loc
-    if parent:
-        o.parent = parent
+    o.visible_shadow = False
+    b = Builder()  # arkasında koyu tabela levhası ve ince çelik çerçeve: altın logo koyu zeminde okunur
+    b.box((w * 1.1, 0.04, height * 1.06), (0, 0.025, 0), M["sign_plate"])
+    for sz in (-1, 1):
+        b.box((w * 1.1 + 0.08, 0.06, 0.04), (0, 0.02, sz * (height * 0.53 + 0.02)), M["steel"])
+        b.box((0.04, 0.06, height * 1.06 + 0.08), (sz * (w * 0.55 + 0.02), 0.02, 0), M["steel"])
+    plate = b.build("logo_sign", bevel=0.005)
+    plate.location = loc
     return o
 
 
@@ -1487,14 +1533,14 @@ def shot_contain(pine):
 
 
 def shot_protect(pine):
-    """Tesis kapısı: kamera yol boyunca kapıya ve SCP amblemine yaklaşır (yazı 2D katmanda)."""
+    """Tesis kapısı: kamera yol boyunca kapıya ve kapıdaki oyun logosuna yaklaşır (yazı 2D katmanda)."""
     f0, f1, O = SHOTS["protect"]
     r0, r1 = span("protect")
     events = {}
     ground(O)
     road(O + Vector((0, 14, 0)), 40, 7, along_x=False)
     fog(O + Vector((0, 20, 0)), (100, 80, 30), density=0.0075, ground_boost=2.2)
-    forest(pine, O + Vector((0, 45, 0)), (60, 18), 160, [], seed=5)
+    forest(pine, O + Vector((0, 45, 0)), (60, 18), 160, [(-60, 60, -18, -12)], seed=5)  # kapı duvarının önü boş
     forest(pine, O + Vector((-32, 15, 0)), (14, 25), 50, [], seed=6)
     forest(pine, O + Vector((32, 15, 0)), (14, 25), 50, [], seed=7)
 
@@ -1509,7 +1555,7 @@ def shot_protect(pine):
     gb.box((3.4, 0.2, 4.6), (-1.72, W, 2.3), M["steel"])
     gb.box((3.4, 0.2, 4.6), (1.72, W, 2.3), M["steel"])
     for k in range(9):
-        gb.box((0.45, 0.05, 0.35), (-4.0 + k * 1.0, W - 0.72, 5.05), M["hazard"], (0, 0.6, 0))
+        gb.box((0.45, 0.05, 0.35), (-4.0 + k * 1.0, W - 0.72, 4.95), M["hazard"], (0, 0.6, 0))
     for x in (-6.5, 6.5):
         gb.box((0.25, 0.25, 9), (x, W - 1.5, 4.5), M["steel"])
         gb.box((0.9, 0.5, 0.4), (x, W - 1.75, 9.0), M["steel"])
@@ -1534,11 +1580,11 @@ def shot_protect(pine):
         o = link(bpy.data.objects.new("coil", coil))
         o.location = O + Vector((x, W, 5.4))
         o.rotation_euler = (0, 0.25, 0)
-    emblem(O + Vector((0, W - 0.75, 6.6)), 1.6)
+    logo_plate(O + Vector((0, W - 0.72, 6.8)), 3.0)
     for x in (-6.5, 6.5):
         spot("flood", O + Vector((x, W - 2.1, 8.9)), O + Vector((x * 0.3, 15, 0)), 3200,
              (0.85, 0.92, 1), 55, 0.5, 80, shadow=True)
-    spot("emblem_key", O + Vector((0, W - 6, 2)), O + Vector((0, W - 0.75, 6.6)), 2600, (1, 1, 1), 30, 0.5, 20)
+    spot("logo_key", O + Vector((0, W - 6, 2)), O + Vector((0, W - 0.72, 6.8)), 1600, (1, 0.95, 0.86), 55, 0.8, 20)
     tw = Builder()
     for dx in (-1, 1):
         for dy in (-1, 1):
@@ -1578,16 +1624,16 @@ def shot_protect(pine):
         grass(f"grass_p{k}", O + Vector((x, y, 0)), 220, 30 + k, r0, r1, (0.2, 0.75), 0.45)
 
     p0, p1 = O + Vector((-0.15, -1.2, 2.0)), O + Vector((0.45, 6.5, 1.7))
-    emb_c = O + Vector((0, W - 0.75, 6.6))
-    cam = camera("cam_protect", 24, p0, emb_c, 4.0)
+    logo_c = O + Vector((0, W - 0.72, 6.8))
+    cam = camera("cam_protect", 24, p0, logo_c, 4.0)
     for f in range(r0, r1 + 1):
         u = (f - f0) / (f1 - f0)
         p = p0.lerp(p1, 0.35 * smoothstep(u) + 0.65 * u)
-        # amblem kadrajın üst üçte birinde kalsın (ortadaki 2D yazıyla üst üste binmesin)
-        aim_pt = emb_c - Vector((0, 0, 0.22 * (emb_c.y - p.y)))
+        # logo kadrajın üst üçte birinde kalsın (ortadaki 2D yazıyla üst üste binmesin)
+        aim_pt = logo_c - Vector((0, 0, 0.22 * (logo_c.y - p.y)))
         key(cam, f, loc=p, rot=look_rot(p, aim_pt), interp="LINEAR")
     handheld(cam, 0.4)
-    focus_track(cam, r0, r1, lambda f: (emb_c - p0.lerp(p1, (f - f0) / (f1 - f0))).length)
+    focus_track(cam, r0, r1, lambda f: (logo_c - p0.lerp(p1, (f - f0) / (f1 - f0))).length)
     events["camera_hits"] = len(camera_clear(cam, range(r0, r1 + 1, 6)))
     return cam, events
 
