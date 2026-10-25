@@ -1020,8 +1020,11 @@ def drive(root, path, wheel_r=0.55):
 
 
 def fc_noise(obj, path, index, strength, scale, phase=None):
-    obj.keyframe_insert(path, index=index, frame=F_START)
-    fc = obj.animation_data.action.fcurves.find(path, index=index)
+    ad = obj.animation_data
+    fc = ad.action.fcurves.find(path, index=index) if ad and ad.action else None
+    if fc is None:  # eğri yoksa sabit bir anahtar; varsa mevcut anahtarların üstüne yazılmaz
+        obj.keyframe_insert(path, index=index, frame=F_START)
+        fc = obj.animation_data.action.fcurves.find(path, index=index)
     mod = fc.modifiers.new("NOISE")
     mod.strength, mod.scale = strength, scale
     mod.phase = phase if phase is not None else random.uniform(0, 100)
