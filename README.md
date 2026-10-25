@@ -132,29 +132,37 @@ Linux'ta sunucuda çalıştırmak için `libegl1` gerekir (ekran kartı gerekmez
 
 # SCP Sinematiği (7 saniye, Blender)
 
-Referans: SCP: Roleplay videosunun 00:25-00:32 arası (siyah ekran + üç sert kesme).
-Karakter yok; silah kasaları, zırhlı araçlar, sisli çam ormanı ve tesis kapısı.
+Referans: SCP: Roleplay videosunun 00:25-00:32 arası (siyah ekran + üç plan).
+Karakter yok; silah kasaları ve M4A1'ler, zırhlı araç konvoyu, sisli göknar ormanı, tesis kapısı.
 
 | Saniye    | Plan    | Görüntü                                                                     | Ses                                  |
 |-----------|---------|-----------------------------------------------------------------------------|--------------------------------------|
-| 0 - 1     | –       | siyah                                                                       | sessizlik, sonda emme                |
-| 1 - 3     | SECURE  | sisli ormanda kasa deposu; ön plandaki kasa yığını kayarken yazı arkasından belirir; ortada kapağı açık tüfek kasası, asılı çalışma lambası | vuruş, whoosh, kilit klak'ı |
-| 3 - 5     | CONTAIN | gece orman yolu; tepe lambası dönen iki zırhlı araç önden geçer, yazı aralarından ve sonra görünür | vuruş, dizel motorlar (Doppler, sol->sağ) |
-| 5 - 7     | PROTECT | kamera harflerin altından geçip ormandaki tesis kapısına, amblemin önüne ilerler; projektörler, kule, park etmiş kamyonlar | vuruş, whoosh, sonda büyük vuruş |
+| 0 - 1     | –       | siyah, siyahtan yumuşak açılış                                              | emme + ters yankı kabarması          |
+| 1 - 3     | SECURE  | sisli ormanda kasa deposu; ön plandaki kasa yığını kayarken yazı arkasından belirir; odak kasalardan yazıya kayar; kasaya dayalı M4A1'ler, asılı lamba, havada toz | trailer darbesi, kayan whoosh, metal tıngırtı, lamba vızıltısı, telsiz |
+| 3 - 5     | CONTAIN | alçak kamera, gece orman yolu; tepe lambası dönen iki 8x8 zırhlı araç önden geçer, odak araçlara kayar; ön planda otlar | braam + darbe, dizel motorlar (ateşleme sırası, Doppler, sol->sağ), lastik/çakıl |
+| 5 - 7     | PROTECT | kamera harflerin altından geçip tesis kapısına ilerler; odak yazıdan ambleme kayar; çit, bariyer, kule, kamyonlar | darbe, harf whoosh'u, uzak siren, sonda büyük darbe |
+
+Planlar arası 0.33 sn çapraz geçiş: her plan kesmenin iki yanına 10 kare taşacak şekilde ayrı
+render edilir ve ffmpeg `xfade` ile birleşir; kamera ve araçlar geçiş boyunca hareketini sürdürür.
 
 ```bash
-python3.11 -m pip install bpy==4.2.0               # Blender Python modülü (Python 3.11)
-python assets/fetch_polyhaven.py                   # Poly Haven modelleri (CC0, ~120 MB)
-python3.11 blender/scp_cinematic.py --preview      # hızlı önizleme kareleri (640x360)
-python scp_intro.py --preview                      # output/taslak/scp_onizleme.mp4
-python3.11 blender/scp_cinematic.py                # final kareler (1920x1080, EEVEE)
-python scp_intro.py                                # output/scp_cinematic.mp4
-python3.11 blender/scp_cinematic.py --preview --still 100,240,395   # tek tek kareler
+python3.11 -m pip install bpy==4.2.0 scipy        # Blender Python modülü (Python 3.11)
+pip install -r requirements.txt                   # numpy, scipy, imageio-ffmpeg (ses + birleştirme)
+python assets/fetch_polyhaven.py                  # Poly Haven modelleri (CC0) + göknar .blend
+python3.11 blender/bake_trees.py                  # göknarları impostor görüntülerine pişir (bir kez)
+python3.11 blender/render_chunks.py --preview --step 2   # önizleme kareleri (640x360)
+python scp_intro.py --preview                     # output/taslak/scp_onizleme.mp4
+python3.11 blender/render_chunks.py               # final kareler (1920x1080), kaldığı yerden sürer
+python scp_intro.py                               # output/scp_cinematic.mp4
+python3.11 blender/scp_cinematic.py --preview --still 72,232,405   # tek tek kareler
 ```
 
-- `blender/scp_cinematic.py` - sahne, ışık, sis, kamera ve render (headless bpy)
-- `scp_sound.py` - ses tasarımı (numpy ile sentez; zamanlar `meta.json`'dan)
-- `scp_intro.py` - siyah giriş, vinyet, film greni, ses -> MP4
-- `assets/models/` - dış modeller: kasalar, tüfek, mühimmat, bidon, jeneratör, lamba, bariyer, çit
-  Poly Haven'den (`assets/fetch_polyhaven.py`); zırhlı araç ve kamyon için model yoksa blok
-  modeller kullanılır, bkz. `assets/models/README.md`
+- `blender/scp_cinematic.py` - sahne, ışık, sis, kamera, odak kaydırma, toz/bokeh, render (headless bpy)
+- `blender/vehicles.py` - prosedürel 8x8 zırhlı araç ve 6x6 askerî kamyon (gerçek ölçüler, kamuflaj + çamur)
+- `blender/bake_trees.py` - Poly Haven fir_tree_01'in üç ağacını çapraz düzlemli impostora pişirir
+- `blender/render_chunks.py` - planları küçük gruplar halinde ayrı işlemlerde render eder (bellek)
+- `scp_sound.py` - ses tasarımı: dizel motor + Doppler'li geçiş, trailer darbeleri, braam, ortam,
+  ducking, kompresör/limiter (numpy + scipy ile sentez; zamanlar `meta.json`'dan)
+- `scp_intro.py` - siyah giriş, çapraz geçişler, kararma, vinyet, film greni, ses -> MP4
+- `assets/models/` - dış modeller (bkz. `assets/models/README.md`, `CREDITS.md`); M4A1: Lolik123654
+  (Sketchfab, CC BY 4.0) - videoyu paylaşırken açıklamaya yazılmalı

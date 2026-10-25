@@ -399,7 +399,7 @@ def make_materials():
     M["emblem"] = material("emblem", (0.75, 0.75, 0.75), 0.35, 0.6, emit=(1, 1, 1), strength=0.4)
     M["ground"] = ground_material()
     M["road"] = material("road", (0.025, 0.024, 0.022), 0.35)
-    M["dust"] = material("dust", (0.8, 0.78, 0.72), 0.5)
+    M["dust"] = material("dust", (0.9, 0.88, 0.82), 0.5, emit=(1, 0.95, 0.85), strength=1.5)
     M["weed"] = weed_material()
     M["crate"] = material("crate_wood", (0.06, 0.07, 0.04), 0.8)
     M["stencil"] = material("stencil", (0.55, 0.45, 0.08), 0.7)
@@ -1368,6 +1368,8 @@ SHOT_FUNCS = {"secure": shot_secure, "contain": shot_contain, "protect": shot_pr
 def build(preview, name):
     """Tek bir planı kurar (bellek: her işlem yalnızca kendi planını taşır)."""
     s = setup_scene(preview)
+    _TEMPLATES.clear()  # önceki planın nesneleri sahne sıfırlanınca silindi
+    vehicles._MATS.clear()
     make_materials()
     pine = impostor_tree() or realize_tree_template(asset("pine", proxy_pine))
     random.seed(7 + list(SHOTS).index(name))  # plan başına sabit tohum
