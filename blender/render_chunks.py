@@ -19,8 +19,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 # scp_cinematic.SHOTS ve HANDLE ile aynı olmalı (bpy'yi yüklememek için burada tekrarlanır).
-SHOTS = {"secure": (61, 180), "contain": (181, 300), "protect": (301, 420)}
-F_START, F_END, HANDLE = 61, 420, 10
+SHOTS = {"secure": (1, 216), "contain": (217, 408), "protect": (409, 552)}
+F_START, F_END, HANDLE = 1, 552, 0
 
 
 def span(name):

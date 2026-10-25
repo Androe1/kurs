@@ -1,27 +1,21 @@
-"""SCP tarzı 7 saniyelik mini sinematik (headless bpy): SECURE / CONTAIN / PROTECT.
+"""SCP tarzı 12 saniyelik sinematik (headless bpy): depo -> yol -> tesis (+ 2D logo kartı).
 
-    python blender/scp_cinematic.py --preview         # hızlı önizleme (640x360, az örnek)
-    python blender/scp_cinematic.py                   # final: EEVEE, 1920x1080, motion blur
-    python blender/scp_cinematic.py --still 240       # tek kare (Blender kare numarası)
-    python blender/scp_cinematic.py --frames 181-300  # yalnızca bir aralık
+    python3.11 blender/render_chunks.py --preview --step 2   # önizleme (640x360)
+    python3.11 blender/render_chunks.py --step 2             # final: 1920x1080, 30 fps render
+    python3.11 blender/scp_cinematic.py --preview --still 60,300,480
+    python3.11 blender/scp_cinematic.py --shot secure --check  # yalnızca kurulum kontrolleri
 
-Kurgu (referans 00:25-00:32 ile aynı ritim; 0-1 sn siyahı scp_cinematic.py ekler):
+Kurgu (t = final videodaki saniye; yazılar ve logo scp_intro.py'de 2D katman olarak basılır):
 
-  kare  61-180  (1-3 sn)  SECURE  - gece, sisli çam ormanı. Kameranın 1.4 m önünden bir
-                                    tüfek sağdan sola geçer; yazı tüfeğin geçtiği yerden
-                                    belirir (silüetle silme). Arkada sisi delen projektör.
-  kare 181-300  (3-5 sn)  CONTAIN - karanlık orman yolu. Tepe lambası dönen zırhlı araç
-                                    kameranın önünden geçip yazıyı örter, geçince yazı
-                                    yeniden görünür; farlar sisi yarar.
-  kare 301-420  (5-7 sn)  PROTECT - kamera harflerin altından geçip ormandaki tesis
-                                    kapısına, amblemin önüne ilerler.
+  kare   1-216  (0.0-3.6)  SECURE  - tavanlı depo: kasalar, silah rafında M4A1'ler, kirişe asılı
+                                     lamba, kapıdan giren projektör huzmesi; kamera yavaşça kayar
+  kare 217-408  (3.6-6.8)  CONTAIN - gece orman yolu, iki 8x8 zırhlı araç önden geçer
+  kare 409-552  (6.8-9.2)  PROTECT - kamera tesis kapısına ve SCP amblemine yaklaşır
 
-Modeller: assets/models/ içine rifle / apc / truck / pine dosyası (.glb .gltf .fbx .obj
-.blend) konursa o kullanılır, yoksa aynı ölçüde basit bir blok model kurulur.
-Yönler ve ölçek otomatik ayarlanır; gerekirse assets/models/models.json ile düzeltilir
-(bkz. assets/models/README.md).
+Kurulumdan sonra kontroller yazdırılır ve meta.json'a yazılır: zemine oturma (ışın atışıyla),
+ön plan nesnesinin kadraj kaplaması, kameranın bir objenin içine girip girmediği.
 
-Çıktı: renders/scp/####.png (+ meta.json: ses için olay zamanları).
+Çıktı: renders/scp/<plan>/####.png (+ meta.json: ses ve kurgu için olay zamanları).
 """
 import argparse
 import json
@@ -39,16 +33,21 @@ from mathutils import Euler, Matrix, Vector
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import vehicles  # noqa: E402
+sys.path.insert(0, str(ROOT))
+import scp_logo  # noqa: E402
 ASSETS = ROOT / "assets" / "models"
 FONT = ROOT / "fonts" / "Inter-Light.otf"
 
 FPS = 60
-F_START, F_END = 61, 420
+# Blender karesi f <-> final videoda t = (f - 1) / 60 sn. Planlar sert kesme / siyaha karartma ile
+# ayrılır (taşma yok); 9.2-12.0 sn SCP logosu scp_intro.py'de 2D çizilir.
+F_START, F_END = 1, 552
 SHOTS = {  # ad: (ilk kare, son kare, sahnenin dünya ofseti)
-    "secure": (61, 180, Vector((0, 0, 0))),
-    "contain": (181, 300, Vector((500, 0, 0))),
-    "protect": (301, 420, Vector((1000, 0, 0))),
+    "secure": (1, 216, Vector((0, 0, 0))),       # 0.0-3.6 sn  depo
+    "contain": (217, 408, Vector((500, 0, 0))),  # 3.6-6.8 sn  yol
+    "protect": (409, 552, Vector((1000, 0, 0))),  # 6.8-9.2 sn  tesis
 }
+END_TIME = 12.0
 
 # Modelin yönü: ileri (namlu / aracın önü) +X, yukarı +Z, taban z=0.
 # file: assets/models altındaki klasör (Poly Haven, CC0; assets/fetch_polyhaven.py indirir)
@@ -77,7 +76,7 @@ ASSET_SPECS = {
 # --------------------------------------------------------------------------- yardımcılar
 
 def frame_time(f):
-    """Blender karesi -> final videodaki saniye (ilk 1 sn siyah)."""
+    """Blender karesi -> final videodaki saniye."""
     return (f - 1) / FPS
 
 
@@ -149,6 +148,25 @@ class Builder:
             f.material_index = mi
         bmesh.ops.recalc_face_normals(bm, faces=faces)
 
+    def ring(self, r_in, r_out, thick, mat, segs=128, y=0.0):
+        """XZ düzleminde halka (annulus), Y boyunca thick kalınlığında."""
+        bm = self.bm
+        rows = []
+        for yy in (y - thick / 2, y + thick / 2):
+            for r in (r_out, r_in):
+                rows.append([bm.verts.new((r * math.cos(2 * math.pi * i / segs), yy,
+                                           r * math.sin(2 * math.pi * i / segs))) for i in range(segs)])
+        fo, fi, bo, bi = rows
+        faces = []
+        for i in range(segs):
+            j = (i + 1) % segs
+            faces += [bm.faces.new((fo[i], fo[j], fi[j], fi[i])), bm.faces.new((bo[i], bi[i], bi[j], bo[j])),
+                      bm.faces.new((fo[i], bo[i], bo[j], fo[j])), bm.faces.new((fi[i], fi[j], bi[j], bi[i]))]
+        mi = self._mi(mat)
+        for f in faces:
+            f.material_index = mi
+        bmesh.ops.recalc_face_normals(bm, faces=faces)
+
     def build(self, name, bevel=0.0):
         me = bpy.data.meshes.new(name)
         self.bm.to_mesh(me)
@@ -179,6 +197,16 @@ def spot(name, loc, target, power, color=(1, 1, 1), size=40, blend=0.4, dist=90,
     o.location = loc
     if target is not None:
         aim(o, target)
+    return o
+
+
+def area(name, loc, target, power, size, color=(1, 1, 1)):
+    """Geniş, yumuşak dolgu ışığı (kendisi render'da görünmez, ışık noktası oluşturmaz)."""
+    d = bpy.data.lights.new(name, "AREA")
+    d.energy, d.color, d.size, d.use_shadow = power, color, size, False
+    o = link(bpy.data.objects.new(name, d))
+    o.location = loc
+    aim(o, target)
     return o
 
 
@@ -401,15 +429,112 @@ def make_materials():
     M["steel"] = material("steel", (0.12, 0.12, 0.13), 0.4, 0.8)
     M["hazard"] = material("hazard", (0.6, 0.45, 0.02), 0.6)
     M["wire"] = material("wire", (0.2, 0.2, 0.2), 0.35, 0.9)
-    M["emblem"] = material("emblem", (0.75, 0.75, 0.75), 0.35, 0.6, emit=(1, 1, 1), strength=0.4)
+    M["emblem"] = material("emblem", (0.78, 0.78, 0.76), 0.3, 0.85, emit=(1, 1, 1), strength=0.25)
+    M["emblem_plate"] = material("emblem_plate", (0.05, 0.05, 0.055), 0.5, 0.6)
     M["ground"] = ground_material()
     M["road"] = material("road", (0.025, 0.024, 0.022), 0.35)
-    M["dust"] = material("dust", (0.9, 0.88, 0.82), 0.5, emit=(1, 0.95, 0.85), strength=0.5)
+    M["dust"] = material("dust", (0.8, 0.78, 0.72), 0.5)  # ışık yok: yalnızca huzmelerde görünür
+    M["grass"] = grass_material()
+    M["contact"] = contact_material()
+    M["concrete_floor"] = floor_material()
+    M["corrugated"] = corrugated_material()
+    M["ceiling"] = material("ceiling", (0.03, 0.032, 0.035), 0.8, 0.3)
+    M["rack"] = material("rack", (0.035, 0.04, 0.03), 0.55, 0.6)
+    M["lamp_warm"] = material("lamp_warm", (1, 0.85, 0.6), 0.3, emit=(1, 0.78, 0.5), strength=25)
+    M["sodium"] = material("sodium_lens", (1, 0.85, 0.6), 0.3, emit=(1, 0.8, 0.5), strength=40)
     M["weed"] = weed_material()
     M["crate"] = material("crate_wood", (0.06, 0.07, 0.04), 0.8)
     M["stencil"] = material("stencil", (0.55, 0.45, 0.08), 0.7)
     M["foam"] = material("foam", (0.015, 0.015, 0.015), 0.95)
     M["rope"] = material("rope", (0.25, 0.2, 0.12), 0.9)
+
+
+def contact_material():
+    """Temas gölgesi: merkezde koyu, kenara doğru yumuşakça şeffaflaşan leke."""
+    m = bpy.data.materials.new("contact_shadow")
+    m.use_nodes = True
+    nt = m.node_tree
+    p = nt.nodes["Principled BSDF"]
+    p.inputs["Base Color"].default_value = (0, 0, 0, 1)
+    p.inputs["Roughness"].default_value = 1.0
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    sub = nt.nodes.new("ShaderNodeVectorMath")
+    sub.operation = "SUBTRACT"
+    sub.inputs[1].default_value = (0.5, 0.5, 0.5)
+    mul = nt.nodes.new("ShaderNodeVectorMath")
+    mul.operation = "MULTIPLY"
+    mul.inputs[1].default_value = (1.0, 1.0, 0.0)
+    ln = nt.nodes.new("ShaderNodeVectorMath")
+    ln.operation = "LENGTH"
+    mr = nt.nodes.new("ShaderNodeMapRange")
+    mr.inputs["From Min"].default_value = 0.12
+    mr.inputs["From Max"].default_value = 0.5
+    mr.inputs["To Min"].default_value = 0.7
+    mr.inputs["To Max"].default_value = 0.0
+    mr.interpolation_type = "SMOOTHSTEP"
+    nt.links.new(tc.outputs["Generated"], sub.inputs[0])
+    nt.links.new(sub.outputs[0], mul.inputs[0])
+    nt.links.new(mul.outputs[0], ln.inputs[0])
+    nt.links.new(ln.outputs["Value"], mr.inputs["Value"])
+    nt.links.new(mr.outputs["Result"], p.inputs["Alpha"])
+    if hasattr(m, "surface_render_method"):
+        m.surface_render_method = "BLENDED"
+    return m
+
+
+def floor_material():
+    """Depo beton zemini: lekeli, hafif pürüzlü, ince çatlak bump'ı."""
+    m = material("concrete_floor", (0.09, 0.09, 0.085), 0.75)
+    nt = m.node_tree
+    p = nt.nodes["Principled BSDF"]
+    n = nt.nodes.new("ShaderNodeTexNoise")
+    n.inputs["Scale"].default_value = 1.2
+    n.inputs["Detail"].default_value = 8
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    ramp.color_ramp.elements[0].color = (0.05, 0.05, 0.048, 1)
+    ramp.color_ramp.elements[1].color = (0.13, 0.13, 0.125, 1)
+    nt.links.new(n.outputs["Fac"], ramp.inputs["Fac"])
+    nt.links.new(ramp.outputs["Color"], p.inputs["Base Color"])
+    rr = nt.nodes.new("ShaderNodeMapRange")
+    rr.inputs["To Min"].default_value = 0.45
+    rr.inputs["To Max"].default_value = 0.9
+    nt.links.new(n.outputs["Fac"], rr.inputs["Value"])
+    nt.links.new(rr.outputs["Result"], p.inputs["Roughness"])
+    n2 = nt.nodes.new("ShaderNodeTexNoise")
+    n2.inputs["Scale"].default_value = 40
+    bump = nt.nodes.new("ShaderNodeBump")
+    bump.inputs["Strength"].default_value = 0.15
+    nt.links.new(n2.outputs["Fac"], bump.inputs["Height"])
+    nt.links.new(bump.outputs["Normal"], p.inputs["Normal"])
+    return m
+
+
+def corrugated_material():
+    """Oluklu metal duvar: dalga dokusuyla oluk bump'ı, koyu boya ve pas lekeleri."""
+    m = material("corrugated", (0.05, 0.055, 0.05), 0.5, 0.6)
+    nt = m.node_tree
+    p = nt.nodes["Principled BSDF"]
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    wave = nt.nodes.new("ShaderNodeTexWave")
+    wave.wave_type, wave.bands_direction = "BANDS", "X"
+    wave.inputs["Scale"].default_value = 4.0
+    nt.links.new(tc.outputs["Object"], wave.inputs["Vector"])
+    bump = nt.nodes.new("ShaderNodeBump")
+    bump.inputs["Strength"].default_value = 0.35
+    nt.links.new(wave.outputs["Fac"], bump.inputs["Height"])
+    nt.links.new(bump.outputs["Normal"], p.inputs["Normal"])
+    rust = nt.nodes.new("ShaderNodeTexNoise")
+    rust.inputs["Scale"].default_value = 2.5
+    rust.inputs["Detail"].default_value = 6
+    nt.links.new(tc.outputs["Object"], rust.inputs["Vector"])
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    ramp.color_ramp.elements[0].position = 0.55
+    ramp.color_ramp.elements[0].color = (0.05, 0.055, 0.05, 1)
+    ramp.color_ramp.elements[1].position = 0.75
+    ramp.color_ramp.elements[1].color = (0.09, 0.05, 0.03, 1)
+    nt.links.new(rust.outputs["Fac"], ramp.inputs["Fac"])
+    nt.links.new(ramp.outputs["Color"], p.inputs["Base Color"])
+    return m
 
 
 def weed_material():
@@ -710,7 +835,7 @@ def ground(center, size=180, mat=None):
 def road(center, length, width, along_x=True):
     b = Builder()
     size = (length, width, 0.05) if along_x else (width, length, 0.05)
-    b.box(size, (0, 0, 0.02), M["road"])
+    b.box(size, (0, 0, -0.025), M["road"])  # üst yüzey tam z=0: tekerlekler/bariyerler buna oturur
     o = b.build("road")
     o.location = center
     return o
@@ -774,74 +899,17 @@ def fog(center, size, density=0.05, ground_boost=3.0, color=(0.75, 0.82, 1.0)):
     return o
 
 
-def text3d(name, body, loc, size, reveal=False):
-    cu = bpy.data.curves.new(name, "FONT")
-    cu.body = body
-    cu.font = bpy.data.fonts.load(str(FONT))
-    cu.size = size
-    cu.space_character = 1.06
-    cu.align_x, cu.align_y = "CENTER", "BOTTOM"
-    cu.extrude = 0.015 * size
-    cu.bevel_depth = 0.004 * size
-    o = link(bpy.data.objects.new(name, cu))
-    o.location = loc
-    o.rotation_euler = (math.pi / 2, 0, 0)
-    m = bpy.data.materials.new(name + "_mat")
-    m.use_nodes = True
-    nt = m.node_tree
-    p = nt.nodes["Principled BSDF"]
-    p.inputs["Base Color"].default_value = (0.92, 0.93, 0.95, 1)
-    p.inputs["Roughness"].default_value = 0.4
-    p.inputs["Emission Color"].default_value = (1, 1, 1, 1)
-    p.inputs["Emission Strength"].default_value = 1.2
-    if reveal:
-        # Dünya X'i eşikten büyük olan kısım görünür; eşik kare kare anahtarlanır.
-        geo = nt.nodes.new("ShaderNodeNewGeometry")
-        sep = nt.nodes.new("ShaderNodeSeparateXYZ")
-        thr = nt.nodes.new("ShaderNodeValue")
-        thr.name = "reveal"
-        thr.outputs[0].default_value = 99
-        sub = nt.nodes.new("ShaderNodeMath")
-        sub.operation = "SUBTRACT"
-        mr = nt.nodes.new("ShaderNodeMapRange")
-        mr.inputs["From Min"].default_value = -0.03
-        mr.inputs["From Max"].default_value = 0.03
-        tr = nt.nodes.new("ShaderNodeBsdfTransparent")
-        mix = nt.nodes.new("ShaderNodeMixShader")
-        out = nt.nodes["Material Output"]
-        nt.links.new(geo.outputs["Position"], sep.inputs[0])
-        nt.links.new(sep.outputs["X"], sub.inputs[0])
-        nt.links.new(thr.outputs[0], sub.inputs[1])
-        nt.links.new(sub.outputs[0], mr.inputs["Value"])
-        nt.links.new(mr.outputs["Result"], mix.inputs["Fac"])
-        nt.links.new(tr.outputs[0], mix.inputs[1])
-        nt.links.new(p.outputs[0], mix.inputs[2])
-        nt.links.new(mix.outputs[0], out.inputs["Surface"])
-    cu.materials.append(m)
-    return o
-
-
-def emblem(loc, radius, parent=None):
-    """SCP tarzı amblem: dış halka (üç çentikli) + merkeze bakan üç ok."""
+def emblem(loc, radius, depth=0.09, parent=None):
+    """Tesis kapısındaki SCP amblemi: scp_logo'daki aynı vektör (120° aralıklı üç halka parçası,
+    merkeze bakan üç eş ok, iç halka) XZ düzleminde ekstrüde edilir; ön yüz -Y'ye bakar."""
+    shp = scp_logo.shapes()
     b = Builder()
-    m = M["emblem"]
-    seg = 48
-    for i in range(seg):
-        a = 2 * math.pi * i / seg
-        if any(abs(((a - c) + math.pi) % (2 * math.pi) - math.pi) < 0.16
-               for c in (math.pi / 2, math.pi / 2 + 2.094, math.pi / 2 + 4.189)):
-            continue
-        b.box((radius * 0.16, 0.08, 2 * math.pi * radius / seg * 1.08),
-              (math.cos(a) * radius, 0, math.sin(a) * radius), m, (0, -a, 0))
-    b.cyl(radius * 0.25, radius * 0.25, 0.06, (0, 0, 0), M["steel"], (math.pi / 2, 0, 0), segs=40)
-    for k in range(3):
-        a = math.pi / 2 + k * 2.094
-        c, s = math.cos(a), math.sin(a)
-        r0 = radius * 0.64
-        b.box((radius * 0.36, 0.1, radius * 0.1), (c * r0, -0.02, s * r0), m, (0, -a, 0))
-        b.cyl(radius * 0.13, 0, radius * 0.2, (c * radius * 0.37, -0.02, s * radius * 0.37), m,
-              (0, -a - math.pi / 2, 0), segs=3)
-    o = b.build("emblem", bevel=0.01)
+    for poly in shp["polygons"]:
+        b.prism([(x * radius, y * radius) for x, y in poly], depth, M["emblem"])
+    r_in, r_out = shp["inner_ring"]
+    b.ring(r_in * radius, r_out * radius, depth, M["emblem"])
+    b.box((2.2 * radius, 0.05, 2.2 * radius), (0, depth / 2 + 0.03, 0), M["emblem_plate"])  # arka plaka
+    o = b.build("emblem", bevel=0.004)
     o.location = loc
     if parent:
         o.parent = parent
@@ -935,12 +1003,15 @@ def handheld(cam, amount=1.0):
 
 # --------------------------------------------------------------------------- planlar
 
-def place(name, loc, rz=0.0, parent=None, rot=None):
+def place(name, loc, rz=0.0, parent=None, rot=None, settle=False):
+    """Modeli yerleştirir; settle=True ise sahne kurulunca altındaki yüzeye oturtulur (SETTLE)."""
     o = asset(name, PROXIES.get(name))
     if parent is not None:
         o.parent = parent
     o.location = loc
     o.rotation_euler = rot if rot is not None else (0, 0, rz)
+    if settle:
+        SETTLE.append(o)
     return o
 
 
@@ -949,17 +1020,14 @@ def crate_stack(name, loc, layout, rz=0.0):
     root = empty(name, loc)
     root.rotation_euler = (0, 0, rz)
     for model, x, y, z, r in layout:
-        place(model, (x, y, z), r, parent=root)
+        place(model, (x, y, z), r, parent=root, settle=True)
     return root
 
 
-HANDLE = 10  # geçiş (çapraz geçiş) için her planın kesmeden taşan kare sayısı
-
-
 def span(name):
-    """Planın render aralığı: kesmelerin iki yanına HANDLE kadar taşar (ilk/son plan hariç)."""
+    """Planın render aralığı (Blender kareleri). Geçişler sert kesme / siyaha karartma: taşma yok."""
     f0, f1, _ = SHOTS[name]
-    return max(F_START, f0 - HANDLE), min(F_END, f1 + HANDLE)
+    return f0, f1
 
 
 def smoothstep(u):
@@ -976,8 +1044,8 @@ def focus_track(cam, r0, r1, fn):
         cam.data.keyframe_insert("dof.focus_distance", frame=f)
 
 
-def dust(name, center, size, count, seed, r0, r1, drift=(0.04, 0.02, -0.01), radius=(0.002, 0.006)):
-    """Işık huzmelerinde parlayan, odak dışındayken bokeh'e dönüşen toz zerreleri."""
+def dust(name, center, size, count, seed, r0, r1, drift=(0.04, 0.02, -0.01), radius=(0.002, 0.005)):
+    """Işık huzmelerinde görünen toz zerreleri (kendi ışığı yok)."""
     rng = random.Random(seed)
     bm = bmesh.new()
     for _ in range(count):
@@ -998,213 +1066,438 @@ def dust(name, center, size, count, seed, r0, r1, drift=(0.04, 0.02, -0.01), rad
     return o
 
 
-def bokeh_light(loc, color, power, radius=0.05):
-    """Uzakta küçük ışık: alan derinliğiyle arka planda bokeh dairesi olur."""
-    b = Builder()
-    m = material(f"bokeh_{len(bpy.data.materials)}", color, 0.3, emit=color, strength=40)
-    b.cyl(radius, radius, radius * 2, (0, 0, 0), m, segs=10)
-    o = b.build("bokeh_lamp")
-    o.location = loc
-    point("bokeh_pt", loc, power, color, 0.05, 30)
-    return o
+# --------------------------------------------------------------------------- 3D çimen
+
+def grass_material():
+    """Yaprak başına renk (köşe rengi 'col') + arkadan süzülen ışık için yarı saydamlık."""
+    m = bpy.data.materials.new("grass")
+    m.use_nodes = True
+    nt = m.node_tree
+    p = nt.nodes["Principled BSDF"]
+    at = nt.nodes.new("ShaderNodeAttribute")
+    at.attribute_name = "col"
+    nt.links.new(at.outputs["Color"], p.inputs["Base Color"])
+    p.inputs["Roughness"].default_value = 0.6
+    tr = nt.nodes.new("ShaderNodeBsdfTranslucent")
+    nt.links.new(at.outputs["Color"], tr.inputs["Color"])
+    mix = nt.nodes.new("ShaderNodeMixShader")
+    mix.inputs["Fac"].default_value = 0.3
+    nt.links.new(p.outputs[0], mix.inputs[1])
+    nt.links.new(tr.outputs[0], mix.inputs[2])
+    nt.links.new(mix.outputs[0], nt.nodes["Material Output"].inputs["Surface"])
+    m.use_backface_culling = False
+    return m
 
 
-def weeds(name, loc, count, seed, height=(0.5, 1.1), spread=0.5):
-    """Ön planda yabani ot / sazlık kümesi; rüzgârla hafifçe sallanır."""
+GRASS_COLORS = [(0.08, 0.11, 0.035), (0.055, 0.085, 0.03), (0.12, 0.12, 0.045), (0.17, 0.145, 0.07),
+                (0.1, 0.08, 0.045), (0.07, 0.1, 0.045)]
+
+
+def grass(name, loc, count, seed, r0, r1, height=(0.25, 0.85), spread=0.4, wind=(0.6, 0.25, 0)):
+    """3D çimen kümesi: her yaprak V kesitli (katlanmış) şerit; boy, eğim ve renk yaprak başına
+    değişir. Rüzgâr: uçlara ağırlıklı vertex group + hareketli dokulu iki Displace modifier'ı,
+    böylece her yaprak kendi fazında sallanır, kökler yerinde kalır."""
     rng = random.Random(seed)
+    sx, sy = spread if isinstance(spread, tuple) else (spread, spread * 0.7)
     bm = bmesh.new()
+    col = bm.loops.layers.color.new("col")
+    dl = bm.verts.layers.deform.verify()
     for _ in range(count):
-        base = Vector((rng.gauss(0, spread), rng.gauss(0, spread * 0.6), 0))
-        h = rng.uniform(*height)
-        lean = Vector((rng.uniform(-0.35, 0.35), rng.uniform(-0.2, 0.2), 0)) * h
-        rot = rng.uniform(0, math.pi)
-        side = Vector((math.cos(rot), math.sin(rot), 0)) * rng.uniform(0.006, 0.014)
+        base = Vector((rng.gauss(0, sx), rng.gauss(0, sy), 0))
+        h = rng.uniform(*height) * (0.5 if rng.random() < 0.25 else 1.0)
+        ang = rng.uniform(0, 2 * math.pi)
+        lean_dir = Vector((math.cos(ang), math.sin(ang), 0))
+        lean = lean_dir * h * rng.uniform(0.08, 0.5)
+        side = Vector((-lean_dir.y, lean_dir.x, 0))
+        w0 = rng.uniform(0.004, 0.011)
+        c = Vector(rng.choice(GRASS_COLORS)) * rng.uniform(0.8, 1.25)
+        tip_dry = rng.random() < 0.35
         prev = None
         for k in range(6):
             t = k / 5
-            c = base + lean * (t * t) + Vector((0, 0, h * t))
-            w = side * (1 - t * 0.95)
-            pair = (bm.verts.new(c - w), bm.verts.new(c + w))
+            ctr = base + lean * (t * t) + Vector((0, 0, h * t))
+            w = w0 * (1 - 0.92 * t)
+            fold = lean_dir * w * 0.7  # V kesit: kenarlar orta damardan öne katlanır
+            trio = [bm.verts.new(ctr - side * w + fold), bm.verts.new(ctr), bm.verts.new(ctr + side * w + fold)]
+            for v in trio:
+                v[dl][0] = t * t
             if prev:
-                bm.faces.new((prev[0], prev[1], pair[1], pair[0]))
-            prev = pair
+                for a, b2 in ((0, 1), (1, 2)):
+                    f = bm.faces.new((prev[a], prev[b2], trio[b2], trio[a]))
+                    for lp in f.loops:
+                        tt = (lp.vert.co.z - base.z) / max(h, 1e-3)
+                        cc = c.lerp(Vector((0.21, 0.17, 0.08)), tt * 0.8) if tip_dry else c * (0.85 + 0.3 * tt)
+                        lp[col] = (*cc, 1.0)
+            prev = trio
     me = bpy.data.meshes.new(name)
     bm.to_mesh(me)
     bm.free()
-    me.materials.append(M["weed"])
+    me.materials.append(M["grass"])
     o = link(bpy.data.objects.new(name, me))
     o.location = loc
-    fc_noise(o, "rotation_euler", 0, strength=0.025, scale=18)
-    fc_noise(o, "rotation_euler", 1, strength=0.03, scale=14)
+    o.vertex_groups.new(name="sway")
+    wind_e = empty(name + "_wind", loc)
+    key(wind_e, r0, loc=loc, interp="LINEAR")
+    key(wind_e, r1, loc=Vector(loc) + Vector(wind) * (r1 - r0) / FPS, interp="LINEAR")
+    for axis, sc, st in (("X", 0.7, 0.07), ("Y", 1.1, 0.045)):
+        tex = bpy.data.textures.new(f"{name}_wind_{axis}", "CLOUDS")
+        tex.noise_scale = sc
+        d = o.modifiers.new(f"wind_{axis}", "DISPLACE")
+        d.texture, d.direction, d.strength, d.mid_level = tex, axis, st, 0.5
+        d.texture_coords, d.texture_coords_object, d.vertex_group = "OBJECT", wind_e, "sway"
+    o.visible_shadow = False
     return o
 
 
+# --------------------------------------------------------------------------- yerleşim kontrolleri
+
+SETTLE = []  # zemine/altındaki nesneye oturtulacak kök nesneler (place(..., settle=True))
+
+
+def world_bbox(o):
+    objs = [o] + list(o.children_recursive)
+    pts = [m.matrix_world @ Vector(c) for m in objs if m.type == "MESH" and not m.hide_render for c in m.bound_box]
+    if not pts:
+        return None
+    return Vector([min(q[i] for q in pts) for i in range(3)]), Vector([max(q[i] for q in pts) for i in range(3)])
+
+
+def support_z(o, lo, hi, probe=0.06):
+    """Nesnenin altındaki yüzeyin yüksekliği: nesne gizlenip tabanının 3x3 noktasından aşağı ışın."""
+    hidden = [m for m in [o] + list(o.children_recursive) if m.type == "MESH" and not m.hide_viewport]
+    for m in hidden:
+        m.hide_viewport = True
+    vl = bpy.context.view_layer
+    vl.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    best = None
+    for fx in (0.2, 0.5, 0.8):
+        for fy in (0.2, 0.5, 0.8):
+            orig = Vector((lo.x + (hi.x - lo.x) * fx, lo.y + (hi.y - lo.y) * fy, lo.z + probe))
+            hit, loc, *_ = bpy.context.scene.ray_cast(dg, orig, Vector((0, 0, -1)), distance=5)
+            if hit:
+                best = loc.z if best is None else max(best, loc.z)
+    for m in hidden:
+        m.hide_viewport = False
+    vl.update()
+    return best
+
+
+def settle(objs, tol=0.002):
+    """Her nesneyi (alttan üste) altındaki yüzeye oturtur: havada ya da gömülü kalmasın."""
+    for o in sorted(objs, key=lambda o: world_bbox(o)[0].z if world_bbox(o) else 0):
+        bb = world_bbox(o)
+        if bb is None:
+            continue
+        z = support_z(o, *bb)
+        if z is not None and abs(bb[0].z - z) > tol:
+            mw = o.matrix_world.copy()
+            mw.translation.z -= bb[0].z - z
+            o.matrix_world = mw
+            bpy.context.view_layer.update()
+
+
+def check_grounded(objs, tol=0.005):
+    """Doğrulama: her nesnenin alt sınırı altındaki yüzeyle aynı yükseklikte mi? (rapor + liste)"""
+    bad = []
+    for o in objs:
+        bb = world_bbox(o)
+        if bb is None:
+            continue
+        z = support_z(o, *bb)
+        gap = None if z is None else bb[0].z - z
+        if gap is None or abs(gap) > tol:
+            bad.append((o.name, gap))
+    print(f"[kontrol] zemin: {len(objs)} nesne, {len(bad)} sorunlu {bad[:8]}", flush=True)
+    return bad
+
+
+def contact_shadow(o, strength=0.6):
+    """Temas gölgesi: nesnenin altına yumuşak kenarlı koyu bir leke (ambient occlusion yerine)."""
+    bb = world_bbox(o)
+    if bb is None:
+        return None
+    lo, hi = bb
+    c = (lo + hi) / 2
+    b = Builder()
+    b.box(((hi.x - lo.x) * 1.35 + 0.12, (hi.y - lo.y) * 1.35 + 0.12, 0.001), (0, 0, 0), M["contact"])
+    d = b.build("contact_shadow")
+    d.location = (c.x, c.y, lo.z + 0.0015)
+    d.visible_shadow = False
+    return d
+
+
+def camera_clear(cam, frames, skip=("fog", "ground", "floor", "road", "pine", "dust", "contact", "grass",
+                                   "warehouse")):
+    """Kamera hiçbir objenin sınır kutusunun içine girmiyor mu? (kare kare)"""
+    scene = bpy.context.scene
+    boxes = []
+    for o in bpy.data.objects:
+        if o.type == "MESH" and not o.hide_render and not o.name.startswith(skip):
+            bb = world_bbox(o)
+            if bb:
+                boxes.append((o.name, bb))
+    hits = set()
+    for f in frames:
+        scene.frame_set(f)
+        p = cam.matrix_world.translation
+        for name, (lo, hi) in boxes:
+            if all(lo[i] - 0.05 < p[i] < hi[i] + 0.05 for i in range(3)):
+                hits.add((f, name))
+    print(f"[kontrol] kamera-obje: {len(hits)} çakışma {sorted(hits)[:6]}", flush=True)
+    return hits
+
+
+def frame_coverage(cam, objs, frames):
+    """Nesnelerin ekranda kapladığı alan oranı (izdüşüm sınır kutusu, kadraja kırpılmış)."""
+    from bpy_extras.object_utils import world_to_camera_view
+    scene = bpy.context.scene
+    worst = 0.0
+    for f in frames:
+        scene.frame_set(f)
+        pts = []
+        for o in objs:
+            for m in [o] + list(o.children_recursive):
+                if m.type == "MESH":
+                    pts += [world_to_camera_view(scene, cam, m.matrix_world @ Vector(c)) for c in m.bound_box]
+        xs = [min(max(q.x, 0), 1) for q in pts if q.z > 0]
+        ys = [min(max(q.y, 0), 1) for q in pts if q.z > 0]
+        if xs:
+            worst = max(worst, (max(xs) - min(xs)) * (max(ys) - min(ys)))
+    return worst
+
+
+# --------------------------------------------------------------------------- yapılar
+
+def street_lamp(base, arm_dir, height=6.4, power=6500, target=None, color=(1.0, 0.86, 0.62), head_visible=True):
+    """Direkli sokak lambası: ışık kaynağı görünür bir gövdeye bağlı (havada ışık yok)."""
+    arm = Vector(arm_dir).normalized()
+    b = Builder()
+    b.cyl(0.11, 0.08, 0.25, (0, 0, 0.125), M["steel"], segs=12)
+    b.cyl(0.075, 0.055, height, (0, 0, height / 2), M["steel"], segs=12)
+    tip = arm * 1.5 + Vector((0, 0, height))
+    b.box((1.6, 0.07, 0.07), (arm.x * 0.8, arm.y * 0.8, height - 0.05), M["steel"],
+          (0, 0, math.atan2(arm.y, arm.x)))
+    b.box((0.55, 0.26, 0.12), (tip.x, tip.y, tip.z - 0.08), M["steel"], (0, 0, math.atan2(arm.y, arm.x)))
+    b.box((0.44, 0.18, 0.02), (tip.x, tip.y, tip.z - 0.15), M["sodium"], (0, 0, math.atan2(arm.y, arm.x)))
+    o = b.build("street_lamp")
+    o.location = base
+    head = Vector(base) + Vector((tip.x, tip.y, tip.z - 0.17))
+    spot("street_light", head, target or (head - Vector((0, 0, 5))), power, color, 95, 0.9, 30, shadow=True)
+    return o
+
+
+def warehouse(O):
+    """Depo binası: düz beton zemin, oluklu metal duvarlar, büyük kapı, tavan ve çelik kirişler."""
+    b = Builder()
+    b.box((18, 18, 0.2), (0, 0, -0.1), M["concrete_floor"])
+    W, D, H, door_w, door_h = 8.0, 8.0, 5.0, 2.8, 3.8
+    t = 0.25
+    Hw = H + 0.2  # duvarlar tavan levhasının içine kadar uzanır: birleşim yerinden ışık sızmaz
+    b.box((W - door_w, t, Hw), (-(W + door_w) / 2, D, Hw / 2), M["corrugated"])
+    b.box((W - door_w, t, Hw), ((W + door_w) / 2, D, Hw / 2), M["corrugated"])
+    b.box((2 * door_w, t, Hw - door_h), (0, D, (Hw + door_h) / 2), M["corrugated"])
+    for sx in (-1, 1):
+        b.box((t, 2 * D + t, Hw), (sx * W, 0, Hw / 2), M["corrugated"])
+        b.box((0.3, 0.32, door_h), (sx * (door_w + 0.15), D - 0.1, door_h / 2), M["steel"])  # kapı kasası
+    b.box((2 * W, 2 * D, 0.2), (0, 0, H + 0.1), M["ceiling"])
+    for y in (-3.6, -0.9, 2.2, 5.2):  # I-kesitli tavan kirişleri
+        b.box((2 * W, 0.22, 0.03), (0, y, 4.42), M["steel"])
+        b.box((2 * W, 0.03, 0.36), (0, y, 4.6), M["steel"])
+        b.box((2 * W, 0.22, 0.03), (0, y, 4.78), M["steel"])
+    for sx in (-1, 1):  # duvar lambaları (kafesli, görünür kaynak)
+        b.box((0.12, 0.22, 0.3), (sx * (W - 0.18), 4.0, 3.0), M["steel"])
+        b.box((0.03, 0.16, 0.2), (sx * (W - 0.25), 4.0, 3.0), M["lamp_warm"])
+    shell = b.build("warehouse", bevel=0.0)
+    shell.location = O
+    for sx in (-1, 1):
+        point("wall_lamp", O + Vector((sx * (W - 0.4), 4.0, 3.0)), 60, (1, 0.8, 0.55), 0.08, 9)
+    return shell, 4.42  # kiriş alt yüzü
+
+
+def gun_rack(loc, rz=0.0):
+    """Silah rafı: taban kızağı, dipçik yuvası, üstte yuvalı ray; 4 M4A1 farklı açılarla yaslı."""
+    root = empty("gun_rack", loc)
+    root.rotation_euler = (0, 0, rz)
+    b = Builder()
+    b.box((1.5, 0.42, 0.06), (0, 0, 0.03), M["rack"])
+    b.box((1.5, 0.05, 0.1), (0, -0.16, 0.11), M["rack"])
+    for sx in (-1, 1):
+        b.box((0.06, 0.06, 0.7), (sx * 0.72, 0.15, 0.38), M["rack"])
+        b.box((0.06, 0.36, 0.06), (sx * 0.72, 0.0, 0.03), M["rack"])
+    b.box((1.5, 0.05, 0.05), (0, 0.15, 0.68), M["rack"])
+    for x in (-0.48, -0.16, 0.16, 0.48):
+        b.box((0.012, 0.05, 0.05), (x - 0.045, 0.12, 0.715), M["rack"])
+        b.box((0.012, 0.05, 0.05), (x + 0.045, 0.12, 0.715), M["rack"])
+    rk = b.build("rack", bevel=0.004)
+    rk.parent = root
+    rifles = []
+    for (x, lean, yaw, roll, name) in ((-0.48, 11, -6, -2, "rifle"), (-0.16, 14, 4, 3, "rifle_fde"),
+                                       (0.16, 12, -3, -4, "rifle"), (0.48, 13, 7, 2, "rifle")):
+        r = (Matrix.Rotation(math.radians(yaw), 3, "Z") @ Matrix.Rotation(math.radians(-lean), 3, "X")
+             @ Matrix.Rotation(math.radians(roll), 3, "Y") @ Matrix.Rotation(math.radians(-88), 3, "Y"))
+        rifles.append(place(name, (x, -0.04, 0.5), rot=r.to_euler(), parent=root, settle=True))
+    return root, rk, rifles
+
+
 def shot_secure(pine):
-    """Silah kasaları: ön plandaki kasa yığını kameranın önünden kayar, yazı arkasından belirir."""
+    """Depo: tavanlı, duvarlı bir depoda silah kasaları ve silah rafı; kamera ilk kareden sahneyi
+    gösterir, yavaşça yana kayar. Ön plandaki küçük kasa yığını kadrajın en fazla %20'si."""
     f0, f1, O = SHOTS["secure"]
     r0, r1 = span("secure")
     events = {}
-    ground(O)
-    fog(O + Vector((0, 20, 0)), (90, 90, 30), density=0.02)
-    forest(pine, O + Vector((0, 32, 0)), (45, 30), 170, [(-7, 7, -32, -10)], seed=1)
-    H, OH = CRATE_H, 0.27  # ahşap kasa / yeşil kasa yüksekliği
-    # Arka plan: yazının altında ve iki yanında üst üste kasalar.
-    crate_stack("pile_left", O + Vector((-2.7, 1.3, 0)), [
+    shell, beam_z = warehouse(O)
+    fog(O + Vector((0, 12, 0)), (40, 52, 14), density=0.007, ground_boost=1.6)
+    forest(pine, O + Vector((0, 30, 0)), (40, 16), 120, [], seed=1)  # kapıdan görünen orman
+    H, OH = CRATE_H, 0.27
+    crate_stack("pile_left", O + Vector((-3.0, 1.3, 0)), [
         ("crate", 0, 0, 0, 0), ("crate", 0, 0.56, 0, 0.02), ("crate", 0.05, 0.28, H, -0.04),
         ("crate_olive", 0.1, 0.3, 2 * H, 0.06), ("ammo", 0.85, -0.15, 0, 0.3), ("ammo", 0.83, -0.12, 0.18, 0.1),
-        ("jerrycan", -0.95, -0.1, 0, 1.4), ("jerrycan", -0.95, 0.15, 0, 1.6)], rz=0.12)
-    crate_stack("pile_right", O + Vector((2.75, 1.7, 0)), [
+        ("jerrycan", -0.95, -0.25, 0, 1.45), ("jerrycan", -1.0, 0.25, 0, 1.62)], rz=0.12)
+    crate_stack("pile_right", O + Vector((2.85, 1.7, 0)), [
         ("crate", 0, 0, 0, 0), ("crate", 0, 0.56, 0, 0), ("crate_olive", 0.1, 0.25, H, 0.04),
-        ("crate_olive", 0.0, 0.3, H + OH, -0.05), ("generator", -1.05, -0.25, 0, 0.5),
+        ("crate_olive", 0.0, 0.3, H + OH, -0.05), ("generator", -1.15, -0.3, 0, 0.5),
         ("ammo", 0.95, -0.4, 0, -0.2), ("ammo", 0.95, -0.1, 0, 0.1)], rz=-0.18)
     crate_stack("pile_back", O + Vector((0.4, 4.6, 0)), [
         ("crate", x, y, z, 0) for x in (-1.35, 0, 1.35) for y in (0, 0.56) for z in (0, H)])
-    # Ortada kapağı açık tüfek kasası, önüne dayalı M4'ler; yanında açık yeşil mühimmat kasası.
-    place("crate_open", O + Vector((0.1, -0.6, 0)), 0.05)
-    for name, x, lean, roll in (("rifle", -0.34, -12, -3), ("rifle_fde", 0.04, -14, 2), ("rifle", 0.4, -11, 5)):
-        r = Matrix.Rotation(math.radians(lean), 3, "X") @ Matrix.Rotation(math.radians(roll), 3, "Y") \
-            @ Matrix.Rotation(math.radians(-88), 3, "Y")
-        place(name, O + Vector((0.1 + x, -0.97, 0.43)), rot=r.to_euler())
-    place("rifle", O + Vector((2.72, 1.95, CRATE_H + 2 * 0.27)), -0.15)
-    ammo_c = place("crate_olive_open", O + Vector((-1.15, -0.35, 0)), -0.35)
+    place("crate_open", O + Vector((0.2, -0.7, 0)), 0.05, settle=True)
+    rack, rack_mesh, rifles = gun_rack(O + Vector((-1.55, -0.95, 0)), 0.18)
+    SETTLE.append(rack)
+    ammo_c = place("crate_olive_open", O + Vector((1.6, -1.15, 0)), -0.3, settle=True)
     for dx in (-0.2, 0.08):
-        place("ammo", (dx, 0.0, 0.05), math.pi / 2, parent=ammo_c)
-    place("log", O + Vector((3.4, -1.2, 0)), 0.4)
-    place("stump", O + Vector((-3.6, 3.2, -0.1)), 1.0)
-    # Işık: asılı endüstriyel lamba, arkada sisi delen projektörler.
-    lamp = O + Vector((1.25, -0.9, 2.75))
-    place("hang_lamp", lamp)
-    spot("work_light", lamp - Vector((0, 0, 0.06)), O + Vector((0.2, -0.4, 0)), 3500, (1, 0.86, 0.66), 110,
-         0.8, 25, shadow=True)
-    point("lamp_bulb", lamp + Vector((0, 0, 0.1)), 20, (1, 0.85, 0.65), 0.04, 6)
-    spot("fg_fill", O + Vector((1.8, -6.4, 2.2)), O + Vector((0, -4.7, 1.0)), 160, (1, 0.85, 0.65), 40, 0.8, 6)
-    spot("backlight", O + Vector((1.5, 24, 5)), O + Vector((0, -6, 1.2)), 22000, (0.78, 0.86, 1.0), 70, 0.9,
-         80, shadow=True)
-    spot("backlight_hi", O + Vector((-8, 40, 14)), O + Vector((0, 0, 0)), 25000, (0.7, 0.8, 1.0), 35, 0.8, 90)
-    txt = text3d("SECURE", "SECURE", O + Vector((0, 0.2, 1.5)), 0.66, reveal=True)
-    # Derinlik: huzmelerde toz, ormanın içinde uzak ışıklar (bokeh).
-    dust("dust_secure", O + Vector((0.6, -1.8, 1.7)), (6.5, 6, 3.2), 300, 11, r0, r1)
-    for loc, col, pw in (((-9, 21, 2.0), (1, 0.75, 0.45), 25), ((7.5, 27, 3.2), (0.75, 0.85, 1), 30),
-                         ((-3.5, 34, 1.7), (1, 0.6, 0.25), 25), ((12, 19, 1.4), (0.8, 0.9, 1), 20)):
-        bokeh_light(O + Vector(loc), col, pw)
+        place("ammo", (dx, 0.0, 0.06), math.pi / 2, parent=ammo_c, settle=True)
+    # kasanın üstünde yan yatırılmış bir M4 (yatay, kasaya oturur)
+    place("rifle", O + Vector((2.8, 1.95, 1.3)), rot=(math.radians(90), 0, -0.15), settle=True)
+    # lambalar: kirişlere zincirle asılı (modelin zinciri kirişin alt yüzüne değer); her ışığın
+    # kaynağı görünür bir armatür. Ana lamba ve raf lambası gölgeli.
+    lamp_h = ASSET_SPECS["hang_lamp"]["height"]
+    for i, (x, y, tx, ty, pw, sh) in enumerate(((1.25, -0.9, 0.2, -0.4, 3800, True),
+                                                 (-1.55, -0.9, -1.55, -0.95, 2600, True),
+                                                 (2.7, 2.2, 2.5, 1.6, 2200, False),
+                                                 (-2.9, 2.2, -3.0, 1.4, 2200, False))):
+        lamp = O + Vector((x, y, beam_z - lamp_h))
+        place("hang_lamp", lamp)
+        spot(f"work_light_{i}", lamp + Vector((0, 0, 0.02)), O + Vector((tx, ty, 0)), pw, (1, 0.86, 0.66), 110,
+             0.8, 25, shadow=sh)
+    area("ceiling_fill", O + Vector((0, 0.5, 4.3)), O + Vector((0, 0.5, 0)), 420, 7.0, (0.85, 0.88, 1.0))
+    # kapıdan giren projektör: kaynak duvarın üstünde, kadraj dışında; huzme sisi kapıdan delerek girer
+    spot("door_light", O + Vector((1.2, 14, 7.5)), O + Vector((0, -3, -5.5)), 26000, (0.78, 0.86, 1.0), 38,
+         0.85, 40, shadow=True)
+    spot("fill", O + Vector((0.5, -7.5, 3.2)), O + Vector((0, 0, 0.8)), 220, (0.8, 0.85, 1.0), 70, 0.9, 16)
+    # ön plan: kameraya yakın küçük kasa yığını (sol kenar), arkadan kenar ışığı
+    fg = crate_stack("pile_fg", O + Vector((-1.95, -4.3, 0)), [
+        ("crate", 0, 0, 0, math.pi / 2 + 0.05), ("crate", 0.02, 0.0, H, math.pi / 2 - 0.04),
+        ("crate", -0.01, 0.02, 2 * H, math.pi / 2 + 0.03), ("crate_olive", 0.02, 0.05, 3 * H, math.pi / 2 - 0.1)])
+    spot("fg_rim", O + Vector((-3.3, -2.4, 2.8)), O + Vector((-1.95, -4.3, 1.0)), 900, (0.85, 0.9, 1.0), 40,
+         0.6, 8)
+    settle(SETTLE)
+    settle(SETTLE)  # ikinci tur: üst üste duran nesneler alttakiler oturduktan sonra yeniden hizalanır
+    for o in SETTLE:
+        if o.parent is None or o.parent.name.startswith(("pile_", "gun_rack")):
+            bb = world_bbox(o)
+            if bb and bb[0].z < 0.01:  # yalnızca zemine değenlere temas gölgesi
+                contact_shadow(o)
+    events["grounded_bad"] = len(check_grounded(SETTLE))
 
-    # Ön plan: kameraya 1.3 m mesafede yüksek kasa yığını. Kamera sağa kaydıkça yığın sola akar.
-    fg = crate_stack("pile_fg", O + Vector((0.0, -4.7, 0)), [
-        ("crate", 0, 0, 0, math.pi / 2), ("crate", 0.02, 0, H, math.pi / 2 + 0.03),
-        ("crate", -0.02, 0, 2 * H, math.pi / 2 - 0.02), ("crate", 0.0, 0, 3 * H, math.pi / 2 + 0.04),
-        ("ammo", 0.02, 0.15, 4 * H, 0.2)])
-    edge = empty("fg_edge", (CRATE_W / 2 + 0.03, -0.1, 1.4), fg)  # yığının sağ (sona kalan) kenarı
-    c0, c1 = O + Vector((-0.45, -6.0, 1.3)), O + Vector((1.35, -6.0, 1.34))
-    cam = camera("cam_secure", 32, c0, c0 + Vector((0, 6, 0.18)), 2.2)
+    c0, c1 = O + Vector((-0.75, -6.6, 1.48)), O + Vector((0.45, -5.95, 1.52))
+    cam = camera("cam_secure", 32, c0, c0 + Vector((0, 6, 0.2)), 2.8)
     for f in range(r0, r1 + 1):
         u = (f - f0) / (f1 - f0)
-        e = 0.72 * (1 - (1 - min(u, 1.0)) ** 2.2) + 0.28 * u  # hızlı başlar, yavaşlar ama durmaz
+        e = 0.4 * smoothstep(u) + 0.6 * u
         p = c0.lerp(c1, e)
-        key(cam, f, loc=p, rot=look_rot(p, O + Vector((p.x * 0.4, 0.2, 1.5))), interp="LINEAR")
-    handheld(cam, 0.6)
-    # Odak: önce ön plandaki kasalar net, yazı açılırken odak yazıya kayar.
-    stack = O + Vector((0, -4.7, 1.2))
-    text_c = txt.location + Vector((0, 0, 0.25))
-
-    def focus(f):
-        p = c0.lerp(c1, 0.72 * (1 - (1 - min((f - f0) / (f1 - f0), 1.0)) ** 2.2) + 0.28 * (f - f0) / (f1 - f0))
-        w = smoothstep((f - (f0 + 14)) / 34)
-        return (1 - w) * (stack - p).length + w * (text_c - p).length
-
-    focus_track(cam, r0, r1, focus)
-
-    # Silüetle silme: yazının ön yığının sona kalan kenarı geçtikten sonraki kısmı görünür.
-    thr = txt.data.materials[0].node_tree.nodes["reveal"].outputs[0]
-    scene = bpy.context.scene
-    reveal_done = None
-    for f in range(r0, r1 + 1):
-        scene.frame_set(f)
-        c = cam.matrix_world.translation
-        r = edge.matrix_world.translation
-        t = (txt.location.y - c.y) / (r.y - c.y)
-        x = c.x + (r.x - c.x) * t
-        thr.default_value = x
-        thr.keyframe_insert("default_value", frame=f)
-        if reveal_done is None and x < txt.location.x - 2.2:
-            reveal_done = f
-    events["crate_pass"] = (frame_time(f0), frame_time(reveal_done or f0 + 60))
+        key(cam, f, loc=p, rot=look_rot(p, O + Vector((p.x * 0.3, 1.0, 1.62))), interp="LINEAR")
+    handheld(cam, 0.5)
+    target = O + Vector((0.2, -0.7, 0.6))
+    focus_track(cam, r0, r1, lambda f: (target - c0.lerp(c1, 0.4 * smoothstep((f - f0) / (f1 - f0))
+                                                         + 0.6 * (f - f0) / (f1 - f0))).length)
+    events["fg_coverage"] = round(frame_coverage(cam, [fg], range(r0, r1 + 1, 12)), 3)
+    print(f"[kontrol] ön plan kaplama: {events['fg_coverage']:.0%}", flush=True)
+    events["camera_hits"] = len(camera_clear(cam, range(r0, r1 + 1, 6)))
     return cam, events
 
 
 def shot_contain(pine):
-    """Gece orman yolu: iki zırhlı araç alçak kameranın önünden geçer; odak araçlara kayar."""
+    """Gece orman yolu: alçak kamera yol kenarında, yolun aşağısına bakar. İki zırhlı araç uzaktan
+    farlarıyla yaklaşır ve kameranın yanından arka arkaya geçer (3/4 önden: gövde, farlar, tekerlekler
+    hep görünür). Kamera öndeki aracı hafifçe takip eder; odak araçtan araca kayar."""
     f0, f1, O = SHOTS["contain"]
     r0, r1 = span("contain")
     events = {}
+    lane, road_y = -5.9, -4.5
     ground(O)
-    road(O + Vector((0, -4.5, 0)), 160, 6)
-    road(O + Vector((0, 6.0, 0)), 160, 5)  # yazının arkasındaki uzak şerit
-    spot("lane_lamp", O + Vector((0.5, 4.0, 9)), O + Vector((0.5, 6.0, 0.5)), 9000, (0.8, 0.88, 1.0), 75, 0.9, 25,
-         shadow=True)
-    fog(O + Vector((0, 15, 0)), (110, 80, 30), density=0.03)
-    forest(pine, O + Vector((0, 30, 0)), (55, 26), 200, [(-2, 5, -26, -22), (-60, 60, -26.5, -20.5)], seed=3)
-    txt = text3d("CONTAIN", "CONTAIN", O + Vector((1.3, 2.0, 1.25)), 0.85)
-    spot("text_key", O + Vector((-4, -2, 6)), O + Vector((1.3, 2, 1.6)), 900, (0.75, 0.85, 1), 30, 0.7, 30)
-    spot("deep_glow", O + Vector((3, 13, 5)), O + Vector((-2, 40, 0)), 22000, (0.6, 0.72, 1.0), 60, 0.9, 80)
-    spot("road_glow", O + Vector((-30, -2, 6)), O + Vector((10, -4, 0)), 50000, (0.65, 0.75, 1.0), 40, 0.9, 90)
-    spot("veh_rim", O + Vector((2, 3, 5)), O + Vector((0, -4.5, 1.5)), 6000, (0.7, 0.8, 1.0), 70, 0.9, 30)
-    # Kamera tarafından araçların yanını yalayan ışık (yol lambası gibi): kamuflaj, paneller, yazı okunur.
-    spot("veh_key", O + Vector((-4.5, -11, 4.5)), O + Vector((1.0, -4.6, 1.3)), 9000, (0.85, 0.9, 1.0), 45, 0.9, 25,
-         shadow=True)
-    spot("veh_key2", O + Vector((6.0, -10.5, 3.5)), O + Vector((0.5, -4.6, 1.2)), 5000, (1.0, 0.85, 0.65), 40, 0.9, 25)
+    road(O + Vector((-30, road_y, 0)), 160, 6)
+    fog(O + Vector((-30, 0, 0)), (130, 70, 30), density=0.0065, ground_boost=2.2)
+    forest(pine, O + Vector((-30, 21, 0)), (60, 19), 210, [], seed=3)                 # karşı kenar
+    forest(pine, O + Vector((-40, -26, 0)), (45, 12), 110, [(28, 60, -14, 14)], seed=4)  # kamera tarafı
+    # sokak lambaları: karşı kenarda direkler, kollar yola uzanır (ışık hep görünür bir gövdeye bağlı)
+    for x in (-3.0, -19.0, -35.0):
+        street_lamp(O + Vector((x, -0.9, 0)), (0, -1, 0), target=O + Vector((x, lane, 0)))
+    spot("veh_key", O + Vector((-3.0, -15.0, 5.0)), O + Vector((-9.0, lane, 1.2)), 9000, (0.82, 0.88, 1.0), 50,
+         0.9, 30, shadow=True)
+    spot("veh_rim", O + Vector((-14.0, 6.0, 9.0)), O + Vector((-6.0, lane, 1.6)), 7000, (0.65, 0.78, 1.0), 45,
+         0.9, 30, shadow=True)
+    spot("grass_fill", O + Vector((1.5, -13.5, 2.2)), O + Vector((-4.0, -8.2, 0.2)), 500, (0.8, 0.85, 1.0), 55,
+         0.9, 15, shadow=True)
 
-    # Konvoy: iki zırhlı araç arka arkaya geçer; aralarından ve sonra yazı görünür.
-    # Konvoy: ilk araç kameranın dibinden geçip yazıyı bir an örter (referanstaki silme), ikinci
-    # araç yazının arkasındaki uzak şeritten geçer; yazı planın büyük kısmında okunur kalır.
-    v, x_c = 10.0, 0.6  # 36 km/sa: ağır ve okunur bir geçiş
-    lanes = ((-4.5, 196), (6.0, 262))
-    events["apc_pass"], events["apc_speed"], events["apc_lanes"] = [], v, [y for y, _ in lanes]
-    for y, f_mid in lanes:
+    # Konvoy: iki zırhlı araç aynı (yakın) şeritte, 1.6 sn arayla kameranın yanından geçer.
+    v = 8.0
+    passes = (5.15, 6.75)  # araç merkezinin kameranın hizasından (x=0) geçtiği an (sn)
+    events["apc_pass"], events["apc_speed"], events["apc_lanes"] = list(passes), v, [lane, lane]
+    apcs = []
+    for t_mid in passes:
         apc = asset("apc", proxy_apc)
-        apc.location = O + Vector((0, y, 0.02))
-        drive(apc, [(r0, O.x + x_c + v * (r0 - f_mid) / FPS), (r1, O.x + x_c + v * (r1 - f_mid) / FPS)])
-        rig_vehicle(apc, 2600)
+        apc.location = O + Vector((0, lane, 0))
+        bpy.context.view_layer.update()
+        wheels = [m for m in apc.children_recursive if "wheel" in m]
+        lowest = min((m.matrix_world @ Vector(c)).z for m in wheels for c in m.bound_box)
+        apc.location.z -= lowest  # tekerlek dişleri yolun üst yüzüne (z=0) değsin
+        drive(apc, [(f, O.x + v * (frame_time(f) - t_mid)) for f in (r0, r1)])
+        rig_vehicle(apc, 2000)
         beacon_lights(apc, r0, r1)
-        events["apc_pass"].append(frame_time(f_mid))
-    # Derinlik: kameranın dibinde bulanık otlar, yolda toz, ormanda uzak ışıklar.
-    weeds("weeds_l", O + Vector((-0.75, -8.75, 0)), 70, 21, (0.45, 1.0), 0.28)
-    weeds("weeds_r", O + Vector((1.05, -8.6, 0)), 50, 22, (0.4, 0.85), 0.22)
-    dust("dust_contain", O + Vector((0.5, -5.5, 1.4)), (14, 7, 2.8), 260, 12, r0, r1, drift=(0.25, 0.05, 0.0))
-    for loc, col, pw in (((-7, 19, 2.2), (1, 0.7, 0.4), 30), ((9, 24, 3.0), (0.75, 0.85, 1), 35),
-                         ((-14, 28, 1.6), (0.8, 0.9, 1), 25), ((4.5, 31, 4.5), (1, 0.15, 0.08), 20)):
-        bokeh_light(O + Vector(loc), col, pw)
+        apcs.append(apc)
+    grass("grass_shoulder", O + Vector((-6.0, -8.0, 0)), 900, 21, r0, r1, (0.15, 0.55), (6.5, 0.25))
+    grass("grass_fg", O + Vector((-2.2, -11.6, 0)), 260, 22, r0, r1, (0.3, 0.85), (0.9, 0.5))
+    grass("grass_far", O + Vector((-18.0, -8.1, 0)), 700, 23, r0, r1, (0.2, 0.6), (8.0, 0.3))
+    dust("dust_contain", O + Vector((-8.0, -5.5, 1.4)), (22, 6, 2.8), 260, 12, r0, r1, drift=(0.25, 0.05, 0.0))
 
-    cpos = O + Vector((0, -10.0, 0.9))
-    cam = camera("cam_contain", 35, cpos, O + Vector((1.0, 2, 1.7)), 2.8)
-    for f in (r0, r1):  # doğrusal pan: geçişlerde de sürer
+    cpos = O + Vector((0.0, -10.4, 0.75))
+    cam = camera("cam_contain", 28, cpos, O + Vector((-30, lane, 1.4)), 2.8)
+    for f in (r0, r1):
         u = (f - f0) / (f1 - f0)
-        key(cam, f, rot=look_rot(cpos, O + Vector((-0.6 + 2.5 * u, 2, 1.75 + 0.05 * u))), interp="LINEAR")
-    handheld(cam, 0.9)
-    # Bu planda tüm spotlar gölgeli: yoksa arkadaki aracın farları ve yol ışığı öndeki aracın
-    # gövdesinden geçip etrafındaki sisi aydınlatır, araç süt beyazı bir perdede kalır.
-    for o in bpy.data.objects:
+        key(cam, f, rot=look_rot(cpos, O + Vector((-30 + 15 * u, lane + 0.6, 1.5 - 0.1 * u))), interp="LINEAR")
+    handheld(cam, 0.8)
+    for o in bpy.data.objects:  # yakın araçlar sisi perdelemesin diye bu planda tüm spotlar gölgeli
         if o.type == "LIGHT" and o.data.type == "SPOT":
             o.data.use_shadow = True
-    d_text = (txt.location + Vector((0, 0, 0.3)) - cpos).length
-    d_veh = 5.6
-    focus_track(cam, r0, r1, lambda f: d_text + (d_veh - d_text) * smoothstep((f - 172) / 10)
-                * (1 - smoothstep((f - 222) / 10)))
+
+    def subject(f):  # odak: kadrajdaki öndeki araç (geçip çıkınca arkadaki)
+        t = frame_time(f)
+        xs = [v * (t - tm) for tm in passes]
+        x = next((x for x in xs if x < -3.5), xs[-1])
+        return (Vector((x, lane, 1.2)) - Vector((0, -10.4, 0.75))).length
+
+    focus_track(cam, r0, r1, subject)
+    # ses için dinleyici geometrisi (scp_sound.pass_by): kamera konumu ve plan ortasındaki sağ yönü
+    fwd = (O + Vector((-22.5, lane + 0.6, 1.45)) - cpos).normalized()
+    right = fwd.cross(Vector((0, 0, 1))).normalized()
+    events["listener"], events["listener_right"] = list(cpos - O), list(right)
+    events["camera_hits"] = len(camera_clear(cam, range(r0, r1 + 1, 6)))
+    events["fg_coverage"] = {a.name: frame_coverage(cam, [a], range(r0, r1 + 1, 24)) for a in apcs}
     return cam, events
 
 
 def shot_protect(pine):
-    """Tesis kapısı: kamera harflerin altından geçer, odak yazıdan ambleme kayar."""
+    """Tesis kapısı: kamera yol boyunca kapıya ve SCP amblemine yaklaşır (yazı 2D katmanda)."""
     f0, f1, O = SHOTS["protect"]
     r0, r1 = span("protect")
     events = {}
     ground(O)
     road(O + Vector((0, 14, 0)), 40, 7, along_x=False)
-    fog(O + Vector((0, 20, 0)), (100, 80, 30), density=0.012, ground_boost=2.0)
+    fog(O + Vector((0, 20, 0)), (100, 80, 30), density=0.0075, ground_boost=2.2)
     forest(pine, O + Vector((0, 45, 0)), (60, 18), 160, [], seed=5)
     forest(pine, O + Vector((-32, 15, 0)), (14, 25), 50, [], seed=6)
     forest(pine, O + Vector((32, 15, 0)), (14, 25), 50, [], seed=7)
 
-    # Tesis kapısı: duvar, başlık, kayar kapı, dikenli tel, amblem.
     W = 30.0
     gb = Builder()
     c = M["concrete"]
@@ -1223,10 +1516,10 @@ def shot_protect(pine):
         gb.box((0.8, 0.05, 0.3), (x, W - 2.0, 9.0), M["lamp"])
     for k in range(4):
         gb.box((0.12, 0.05, 0.12), (-1.2 + k * 0.8, W - 0.73, 4.65), M["green"])
-    # duvar üstünde aralıklı küçük lambalar (uzakta bokeh)
     for x in [-26 + 4 * i for i in range(14)]:
         if abs(x) > 5:
-            gb.box((0.25, 0.08, 0.12), (x, W - 0.54, 4.6), M["lamp"])
+            gb.box((0.3, 0.3, 0.1), (x, W - 0.62, 5.0), M["steel"])   # lamba gövdesi
+            gb.box((0.25, 0.08, 0.12), (x, W - 0.54, 4.85), M["lamp"])
     gate = gb.build("gate", bevel=0.02)
     gate.location = O
     bpy.ops.mesh.primitive_torus_add(major_radius=0.36, minor_radius=0.012, major_segments=16,
@@ -1241,12 +1534,11 @@ def shot_protect(pine):
         o = link(bpy.data.objects.new("coil", coil))
         o.location = O + Vector((x, W, 5.4))
         o.rotation_euler = (0, 0.25, 0)
-    emblem(O + Vector((0, W - 0.75, 6.6)), 1.35)
+    emblem(O + Vector((0, W - 0.75, 6.6)), 1.6)
     for x in (-6.5, 6.5):
-        spot("flood", O + Vector((x, W - 2.1, 8.9)), O + Vector((x * 0.3, 8, 0)), 5000,
+        spot("flood", O + Vector((x, W - 2.1, 8.9)), O + Vector((x * 0.3, 15, 0)), 3200,
              (0.85, 0.92, 1), 55, 0.5, 80, shadow=True)
-    spot("emblem_key", O + Vector((0, W - 6, 2)), O + Vector((0, W - 0.75, 6.6)), 1500, (1, 1, 1), 30, 0.5, 20)
-    # Gözetleme kulesi ve dönen arama ışığı.
+    spot("emblem_key", O + Vector((0, W - 6, 2)), O + Vector((0, W - 0.75, 6.6)), 2600, (1, 1, 1), 30, 0.5, 20)
     tw = Builder()
     for dx in (-1, 1):
         for dy in (-1, 1):
@@ -1255,67 +1547,54 @@ def shot_protect(pine):
     tw.box((3.6, 3.6, 0.2), (12, W - 4, 12.2), M["olive2"])
     tw.box((0.1, 0.05, 0.1), (11.0, W - 5.62, 11.2), M["green"])
     tw.box((0.1, 0.05, 0.1), (11.4, W - 5.62, 11.2), M["green"])
+    tw.box((0.5, 0.5, 0.4), (12, W - 5.8, 11.6), M["steel"])  # projektör gövdesi
     tw.build("tower").location = O
     piv = empty("search_pivot", O + Vector((12, W - 5.8, 11.6)))
     spot("search", (0, 0, 0), None, 15000, (0.9, 0.95, 1), 9, 0.3, 120, parent=piv).rotation_euler = (
         math.radians(-70), 0, 0)
-    key(piv, r0, rot=(0, 0, math.radians(30 + 40 * (r0 - f0) / (f1 - f0))), interp="LINEAR")
-    key(piv, r1, rot=(0, 0, math.radians(30 - 40 * (r1 - f0) / (f1 - f0))), interp="LINEAR")
+    key(piv, r0, rot=(0, 0, math.radians(30)), interp="LINEAR")
+    key(piv, r1, rot=(0, 0, math.radians(-5)), interp="LINEAR")
 
     for i, (x, y, rz) in enumerate(((-9.5, 21, math.radians(-70)), (9.0, 19.5, math.radians(-115)))):
         tr = asset("truck", proxy_truck)
-        tr.location = O + Vector((x, y, 0.02))
+        tr.location = O + Vector((x, y, 0.0))
         tr.rotation_euler = (0, 0, rz)
-        rig_vehicle(tr, 1400)
-
-    # Kapıya giden yol: iki yanda tel örgü çit, yolda zikzak beton bariyerler.
+        SETTLE.append(tr)
+        rig_vehicle(tr, lights_on=False)  # park halinde: farlar kapalı (yolda kaynaksız ışık lekesi yok)
     for sx in (-1, 1):
         for k in range(10):
             y = 8.5 + k * 1.91
-            place("fence", O + Vector((sx * 5.2, y + 0.95, 0)), math.pi / 2)
+            place("fence", O + Vector((sx * 5.2, y + 0.95, 0)), math.pi / 2, settle=True)
             pb = Builder()
             pb.cyl(0.04, 0.04, 2.6, (0, 0, 1.3), M["steel"], segs=8)
             pb.build("fence_post").location = O + Vector((sx * 5.2, y, 0))
     for x, y, rz in ((-2.2, 17.5, 0.08), (-0.6, 17.6, -0.05), (1.6, 21.0, 0.1), (3.1, 21.1, -0.04),
                      (-3.0, 24.0, 0.0), (-1.4, 24.1, 0.06)):
-        place("barrier", O + Vector((x, y, 0)), rz)
-    txt = text3d("PROTECT", "PROTECT", O + Vector((0, 1.5, 2.0)), 0.95)
-    spot("text_key", O + Vector((0, -3, 5)), O + Vector((0, 1.5, 2.3)), 700, (0.85, 0.92, 1), 35, 0.6, 20)
-    # Derinlik: yol kenarında otlar, kameranın önünde toz.
-    for k, (x, y) in enumerate(((-3.1, 0.5), (2.9, -0.4), (-4.2, 5.0), (4.0, 6.5))):
-        weeds(f"weeds_p{k}", O + Vector((x, y, 0)), 45, 30 + k, (0.4, 0.9), 0.35)
-    dust("dust_protect", O + Vector((0.3, 4.5, 2.0)), (7, 14, 4), 320, 13, r0, r1, drift=(0.03, -0.1, 0.02))
+        place("barrier", O + Vector((x, y, 0)), rz, settle=True)
+    settle(SETTLE)
+    settle(SETTLE)
+    events["grounded_bad"] = len(check_grounded(SETTLE))
+    for k, (x, y) in enumerate(((-3.0, 0.5), (2.9, 0.0), (-4.2, 5.0), (4.1, 6.5))):
+        grass(f"grass_p{k}", O + Vector((x, y, 0)), 220, 30 + k, r0, r1, (0.2, 0.75), 0.45)
 
-    p0, p1 = O + Vector((-0.2, -2.0, 2.45)), O + Vector((0.9, 9.0, 1.55))
-    t0, t1 = O + Vector((-0.1, 1.5, 2.3)), O + Vector((0, W - 0.75, 6.2))
+    p0, p1 = O + Vector((-0.15, -1.2, 2.0)), O + Vector((0.45, 6.5, 1.7))
     emb_c = O + Vector((0, W - 0.75, 6.6))
-    cam = camera("cam_protect", 24, p0, t0, 2.8)
-
-    def pose(f):
-        u = (f - f0) / (f1 - f0)
-        e = smoothstep(u) * 0.65 + u * 0.35  # baştan hareketli, ortada hızlanan
-        p = p0.lerp(p1, e)
-        aim_u = min(1, max(0, (e - 0.15) / 0.6))
-        return p, t0.lerp(t1, aim_u * aim_u * (3 - 2 * aim_u))
-
-    cross = None
+    cam = camera("cam_protect", 24, p0, emb_c, 4.0)
     for f in range(r0, r1 + 1):
-        p, t = pose(f)
-        key(cam, f, loc=p, rot=look_rot(p, t), interp="LINEAR")
-        if cross is None and f >= f0 and p.y > txt.location.y:
-            cross = f
-    cross = cross or (f0 + f1) // 2
-    handheld(cam, 0.5)
-    text_c = txt.location + Vector((0, 0, 0.35))
-    focus_track(cam, r0, r1, lambda f: (1 - smoothstep((f - cross + 18) / 26)) * max(0.3, (text_c - pose(f)[0]).length)
-                + smoothstep((f - cross + 18) / 26) * (emb_c - pose(f)[0]).length)
-    events["through_text"] = frame_time(cross)
+        u = (f - f0) / (f1 - f0)
+        p = p0.lerp(p1, 0.35 * smoothstep(u) + 0.65 * u)
+        # amblem kadrajın üst üçte birinde kalsın (ortadaki 2D yazıyla üst üste binmesin)
+        aim_pt = emb_c - Vector((0, 0, 0.22 * (emb_c.y - p.y)))
+        key(cam, f, loc=p, rot=look_rot(p, aim_pt), interp="LINEAR")
+    handheld(cam, 0.4)
+    focus_track(cam, r0, r1, lambda f: (emb_c - p0.lerp(p1, (f - f0) / (f1 - f0))).length)
+    events["camera_hits"] = len(camera_clear(cam, range(r0, r1 + 1, 6)))
     return cam, events
 
 
 # --------------------------------------------------------------------------- sahne ve render
 
-def setup_scene(preview):
+def setup_scene(preview, shot):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     s = bpy.context.scene
     s.frame_start, s.frame_end = F_START, F_END
@@ -1332,6 +1611,8 @@ def setup_scene(preview):
             setattr(e, k, v)
     if hasattr(e, "bokeh_max_size"):
         e.bokeh_max_size = 60
+    if hasattr(e, "motion_blur_steps"):  # dönen tekerlekler için çok adımlı hareket bulanıklığı
+        e.motion_blur_steps = 3 if shot == "contain" and not preview else 1
     s.render.use_motion_blur = not preview
     s.render.motion_blur_shutter = 0.7  # 30 fps çıktıda ~125° obtüratör
     s.render.resolution_x, s.render.resolution_y = (640, 360) if preview else (1920, 1080)
@@ -1349,12 +1630,12 @@ def setup_scene(preview):
     w.node_tree.nodes["Background"].inputs["Color"].default_value = (0.004, 0.005, 0.008, 1)
     w.node_tree.nodes["Background"].inputs["Strength"].default_value = 1
     s.world = w
-    moon = bpy.data.lights.new("moon", "SUN")
-    moon.energy, moon.color, moon.angle = 0.1, (0.6, 0.7, 1.0), 0.02
-    moon.use_shadow = False  # çok zayıf; tüm sahneyi kapsayan güneş gölgesi pahalı
-    mo = link(bpy.data.objects.new("moon", moon))
-    mo.rotation_euler = (math.radians(55), 0, math.radians(160))
-    # Bloom: kompozitörde Fog Glow.
+    if shot != "secure":  # depo içinde ay ışığı yok (gölgesiz güneş duvarlardan geçerdi)
+        moon = bpy.data.lights.new("moon", "SUN")
+        moon.energy, moon.color, moon.angle = 0.1, (0.6, 0.7, 1.0), 0.02
+        moon.use_shadow = False
+        mo = link(bpy.data.objects.new("moon", moon))
+        mo.rotation_euler = (math.radians(55), 0, math.radians(160))
     s.use_nodes = True
     nt = s.node_tree
     for n in list(nt.nodes):
@@ -1375,17 +1656,21 @@ SHOT_FUNCS = {"secure": shot_secure, "contain": shot_contain, "protect": shot_pr
 
 def build(preview, name):
     """Tek bir planı kurar (bellek: her işlem yalnızca kendi planını taşır)."""
-    s = setup_scene(preview)
+    s = setup_scene(preview, name)
     _TEMPLATES.clear()  # önceki planın nesneleri sahne sıfırlanınca silindi
     vehicles._MATS.clear()
+    SETTLE.clear()
     make_materials()
     pine = impostor_tree() or realize_tree_template(asset("pine", proxy_pine))
     random.seed(7 + list(SHOTS).index(name))  # plan başına sabit tohum
     cam, events = SHOT_FUNCS[name](pine)
     s.camera = cam
     s.frame_start, s.frame_end = span(name)
-    events.update({"cuts": [frame_time(SHOTS[k][0]) for k in SHOTS], "end": frame_time(F_END + 1),
-                   "spans": {k: list(span(k)) for k in SHOTS}})
+    events.update({"cuts": [frame_time(SHOTS[k][1] + 1) for k in SHOTS], "end": END_TIME,
+                   "spans": {k: list(span(k)) for k in SHOTS}, f"checks_{name}": {
+                       k: events.get(k) for k in ("grounded_bad", "fg_coverage", "camera_hits")}})
+    for k in ("grounded_bad", "fg_coverage", "camera_hits"):
+        events.pop(k, None)
     return s, events
 
 
@@ -1398,11 +1683,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--preview", action="store_true")
     ap.add_argument("--shot", choices=list(SHOTS), help="render edilecek plan (yoksa üçü sırayla)")
-    ap.add_argument("--still", help="tek kare ya da virgüllü liste (ör. 100,240,395)")
-    ap.add_argument("--frames", help="planın içinde bir aralık, ör. 181-240")
-    ap.add_argument("--step", type=int, default=1, help="her N karede bir render (önizleme için 2)")
+    ap.add_argument("--still", help="tek kare ya da virgüllü liste (ör. 100,300,480)")
+    ap.add_argument("--frames", help="planın içinde bir aralık, ör. 217-300")
+    ap.add_argument("--step", type=int, default=1, help="her N karede bir render (2 = 30 fps)")
     ap.add_argument("--out", help="çıktı klasörü (varsayılan renders/scp veya renders_preview/scp)")
     ap.add_argument("--save-blend", action="store_true", help="sahneyi .blend olarak da kaydet")
+    ap.add_argument("--check", action="store_true", help="yalnızca sahneyi kur ve kontrolleri yazdır")
     a = ap.parse_args(argv)
     out = Path(a.out) if a.out else ROOT / ("renders_preview" if a.preview else "renders") / "scp"
     out.mkdir(parents=True, exist_ok=True)
@@ -1423,6 +1709,8 @@ def main():
         meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
         meta.update({"fps": FPS, "first_frame": F_START, "step": a.step, **events})
         meta_path.write_text(json.dumps(meta, indent=2))
+        if a.check:
+            continue
         if a.save_blend:
             bpy.ops.wm.save_as_mainfile(filepath=str(out / f"scp_{name}.blend"))
         if a.frames:

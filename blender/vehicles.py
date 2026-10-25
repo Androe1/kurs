@@ -102,7 +102,40 @@ def paint_material(name, camo=((0.05, 0.056, 0.034), (0.034, 0.03, 0.02), (0.016
     nt.links.new(mask.outputs["Result"], _sock(mix, "Factor", "VALUE"))
     nt.links.new(var.outputs[2], _sock(mix, "A", "RGBA"))
     _sock(mix, "B", "RGBA").default_value = (*mud, 1)
-    nt.links.new(_sock(mix, "Result", "RGBA", out=True), p.inputs["Base Color"])
+    # kir akıntıları: Z'de uzatılmış gürültü (yağmurla süzülen kir), koyulaştırır
+    stc = nt.nodes.new("ShaderNodeMapping")
+    stc.inputs["Scale"].default_value = (6.0, 6.0, 0.35)
+    nt.links.new(tc.outputs["Object"], stc.inputs["Vector"])
+    streak = nt.nodes.new("ShaderNodeTexNoise")
+    streak.inputs["Scale"].default_value = 3.0
+    streak.inputs["Detail"].default_value = 4
+    nt.links.new(stc.outputs["Vector"], streak.inputs["Vector"])
+    smask = nt.nodes.new("ShaderNodeMapRange")
+    smask.inputs["From Min"].default_value = 0.5
+    smask.inputs["From Max"].default_value = 0.72
+    smask.inputs["To Max"].default_value = 0.45
+    nt.links.new(streak.outputs["Fac"], smask.inputs["Value"])
+    grime = nt.nodes.new("ShaderNodeMix")
+    grime.data_type = "RGBA"
+    grime.blend_type = "MULTIPLY"
+    nt.links.new(smask.outputs["Result"], _sock(grime, "Factor", "VALUE"))
+    nt.links.new(_sock(mix, "Result", "RGBA", out=True), _sock(grime, "A", "RGBA"))
+    _sock(grime, "B", "RGBA").default_value = (0.35, 0.32, 0.28, 1)
+    # üst yüzeylerde toz: dünya normali yukarı bakan yüzler açık toz rengine çekilir
+    geo = nt.nodes.new("ShaderNodeNewGeometry")
+    nsep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    nt.links.new(geo.outputs["Normal"], nsep.inputs[0])
+    dmask = nt.nodes.new("ShaderNodeMapRange")
+    dmask.inputs["From Min"].default_value = 0.6
+    dmask.inputs["From Max"].default_value = 0.95
+    dmask.inputs["To Max"].default_value = 0.35
+    nt.links.new(nsep.outputs["Z"], dmask.inputs["Value"])
+    dust = nt.nodes.new("ShaderNodeMix")
+    dust.data_type = "RGBA"
+    nt.links.new(dmask.outputs["Result"], _sock(dust, "Factor", "VALUE"))
+    nt.links.new(_sock(grime, "Result", "RGBA", out=True), _sock(dust, "A", "RGBA"))
+    _sock(dust, "B", "RGBA").default_value = (0.11, 0.1, 0.085, 1)
+    nt.links.new(_sock(dust, "Result", "RGBA", out=True), p.inputs["Base Color"])
     rough = nt.nodes.new("ShaderNodeMapRange")
     rough.inputs["To Min"].default_value = 0.52
     rough.inputs["To Max"].default_value = 0.92
@@ -126,6 +159,36 @@ def simple(name, color, rough=0.5, metal=0.0, emit=None, strength=0.0):
     if emit:
         p.inputs["Emission Color"].default_value = (*emit, 1)
         p.inputs["Emission Strength"].default_value = strength
+    return m
+
+
+def tire_material():
+    """Kauçuk: ince gürültü bump'ı, pürüzlülük değişimi, dağınık kuru çamur lekeleri."""
+    m = simple("tire_rubber", (0.016, 0.015, 0.014), 0.86)
+    nt = m.node_tree
+    p = nt.nodes["Principled BSDF"]
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    n = nt.nodes.new("ShaderNodeTexNoise")
+    n.inputs["Scale"].default_value = 9
+    n.inputs["Detail"].default_value = 6
+    nt.links.new(tc.outputs["Object"], n.inputs["Vector"])
+    mud = nt.nodes.new("ShaderNodeMapRange")
+    mud.inputs["From Min"].default_value = 0.55
+    mud.inputs["From Max"].default_value = 0.68
+    nt.links.new(n.outputs["Fac"], mud.inputs["Value"])
+    mix = nt.nodes.new("ShaderNodeMix")
+    mix.data_type = "RGBA"
+    nt.links.new(mud.outputs["Result"], _sock(mix, "Factor", "VALUE"))
+    _sock(mix, "A", "RGBA").default_value = (0.016, 0.015, 0.014, 1)
+    _sock(mix, "B", "RGBA").default_value = (0.05, 0.04, 0.028, 1)
+    nt.links.new(_sock(mix, "Result", "RGBA", out=True), p.inputs["Base Color"])
+    fine = nt.nodes.new("ShaderNodeTexNoise")
+    fine.inputs["Scale"].default_value = 60
+    nt.links.new(tc.outputs["Object"], fine.inputs["Vector"])
+    bump = nt.nodes.new("ShaderNodeBump")
+    bump.inputs["Strength"].default_value = 0.12
+    nt.links.new(fine.outputs["Fac"], bump.inputs["Height"])
+    nt.links.new(bump.outputs["Normal"], p.inputs["Normal"])
     return m
 
 
@@ -154,7 +217,7 @@ def mats():
         _MATS.update(
             paint=paint_material("vehicle_paint"),
             paint_dark=paint_material("vehicle_paint_dark", camo=((0.03, 0.033, 0.022),) * 3),
-            rubber=simple("tire_rubber", (0.014, 0.013, 0.012), 0.88),
+            rubber=tire_material(),
             rim=simple("rim_paint", (0.035, 0.038, 0.026), 0.6, 0.2),
             steel=simple("vehicle_steel", (0.06, 0.06, 0.062), 0.45, 0.8),
             gun=simple("gun_parkerized", (0.02, 0.02, 0.021), 0.5, 0.7),
@@ -319,7 +382,7 @@ def wheel(name, r=0.56, w=0.42, rim_r=0.33, lugs=34, parent=None, loc=(0, 0, 0),
                (math.pi / 2, 0, 0), segs=6)
     vb.cyl_between((0.05, h + 0.06, 0.03), (0.24, h - 0.01, 0.12), 0.008, M["black"], 6)
     o = vb.build(name, parent, loc, bevel=0.006, smooth=50)
-    o["wheel"] = r
+    o["wheel"] = r + 0.027  # yuvarlanma yarıçapı: diş bloklarının dış yüzü (dönüş hızı buna göre)
     if mirror:
         o.scale = (1, -1, 1)
     return o
@@ -401,6 +464,26 @@ def apc(font=None, label="E-11"):
     # yan eğimde kazma-kürek
     vb.box((1.1, 0.04, 0.05), (-1.0, 1.25, 1.83), M["wood"], (0.55, 0, 0))
     vb.box((0.28, 0.02, 0.22), (-0.38, 1.24, 1.83), M["steel"], (0.55, 0, 0))
+    # tavan kenarı ve ön eğik plaka boyunca cıvata sıraları
+    for sy in (-1, 1):
+        bolts(vb, [(x, sy * 1.105, 2.115) for x in [-3.25 + 0.27 * i for i in range(21)]], "z", M["steel"],
+              r=0.013, h=0.012)
+        bolts(vb, [(x, sy * 1.355, 1.2) for x in [-3.3 + 0.3 * i for i in range(19)]], "z", M["steel"],
+              r=0.012, h=0.012)
+    bolts(vb, [(-3.515, y, z) for y in [-0.75 + 0.15 * i for i in range(11)] for z in (1.0, 1.9)], "x",
+          M["steel"], r=0.013, h=0.012)
+    # ön eğik plakada iki erişim kapağı: çerçeve, menteşe, tutamak
+    for sy in (-1, 1):
+        rot = (0, math.radians(-37), 0)
+        vb.box((0.62, 0.6, 0.025), (2.62, sy * 0.42, 1.95), dark, rot)
+        for dy in (-0.2, 0.2):
+            vb.cyl(0.022, 0.022, 0.12, (2.38, sy * 0.42 + dy, 2.12), M["steel"], (math.pi / 2, 0, 0), segs=8)
+        vb.box((0.03, 0.16, 0.025), (2.86, sy * 0.42, 1.78), M["steel"], rot)
+    # arka plakada sarılı çeki halatı
+    for k in range(5):
+        a0, a1 = 2 * math.pi * k / 5, 2 * math.pi * (k + 1) / 5
+        vb.cyl_between((-3.55, 0.75 + 0.14 * math.cos(a0), 1.55 + 0.14 * math.sin(a0)),
+                       (-3.55, 0.75 + 0.14 * math.cos(a1), 1.55 + 0.14 * math.sin(a1)), 0.018, M["black"], 6)
     vb.build("apc_details", body, bevel=0.006)
 
     # --- uzaktan kumandalı silah kulesi (M2 .50 + sensör + sis bombası atar)

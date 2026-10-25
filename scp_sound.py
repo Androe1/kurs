@@ -1,22 +1,29 @@
 """SCP sinematiği - ses tasarımı (numpy + scipy ile sentez; hazır ses/örnek kullanılmaz).
 
-Bir SFX sanatçısının katmanlama mantığıyla, her ses fiziksel kaynağından modellenir:
+Bir SFX sanatçısının katmanlama mantığıyla, her ses fiziksel kaynağından modellenir; saf sinüs
+yerine katmanlı, süzülmüş kaynaklar kullanılır:
 
-  araç geçişi   dizel motor: 6 silindirin ateşleme sırasına göre yanma darbeleri (silindir
-                dengesizliği + zamanlama titreşimi -> "gurlama"), egzoz borusu rezonansı (tarak
-                filtre) ve formantlar, dizel tıkırtısı, turbo ıslığı; 8 lastikten yuvarlanma ve
-                çakıl çatırtısı, süspansiyon/ekipman tıngırtıları. Kaynak bir yörüngede hareket
-                eder: değişken gecikme hattıyla Doppler, 1/r zayıflama, uzaklıkla hava soğurması,
-                yerden yansıma (görüntü kaynak), kulaklar arası zaman/seviye farkı
-                (yaklaşım: TrafficSoundSim, EURASIP 2024; motor: darbe dizisi + rezonatör).
-  darbe         trailer "hit" katmanları: geçiş anı (gürültü patlaması + tık), gövde (perdesi
-                düşen sinüs, satürasyon), sub drop, modal metal çınlama, enkaz gürlemesi, uzun yankı
-  geçiş         her kesmeden önce ters yankı kabarması + whoosh (STFT'de kayan bant), braam
-  ortam         gece rüzgârı (esintili), lamba vızıltısı, tesis trafosu, uzak siren, telsiz,
-                gerilim yatağı (yavaş vuruşan alçak küme + cam gibi yüksek ton)
-  mastering     bus kompresörü, yumuşak satürasyon, ileri bakışlı limiter (-1 dBFS)
+  zaman çizgisi  0.4 açılış vuruşu | 3.6 sert kesme | 6.8 siyaha karartma | 9.2 logo (en büyük vuruş)
+                 vuruşlar görüntüdeki kesmelerle aynı örnekte; her sahnenin sesi kendi aralığında
+                 kalır (kesmede 6-30 ms'lik yumuşak kapanış, vuruş altında), yalnızca vuruşların
+                 yankısı geçişe taşar.
+  depo           oda tonu (bina gövdesi gürlemesi, havalandırma hışırtısı), lamba balastı vızıltısı
+                 (süzülmüş darbe dizisi), kapıdan giren rüzgâr, sub-bass vuruşları
+  yol            dizel motor: 6 silindirin ateşleme darbeleri, egzoz rezonansı (tarak filtre),
+                 formantlar, tıkırtı, turbo; 8 lastikten yuvarlanma ve çakıl çatırtısı,
+                 ekipman tıngırtıları. Kaynak kameranın önünden geçen yörüngede hareket eder:
+                 Doppler (değişken gecikme), 1/r, hava soğurması, yerden yansıma, ITD/ILD
+                 (yaklaşım: TrafficSoundSim, EURASIP 2024). Gece rüzgârı.
+  tesis          uzak "whoop" alarm kornası (harmonikli, rezonanslı, doygun; mesafe ve yankı),
+                 trafo vızıltısı, rüzgâr; logoya doğru hızlanan sub vuruşları ve ters yankı
+  darbe          trailer "hit" katmanları: gürültü geçişi, gövde (perdesi düşen), sub drop, koyu
+                 metal çınlama, enkaz gürlemesi, braam, uzun yankı (son vuruşta >2 sn doğal sönüm)
+  temizlik       her parçaya 6 ms giriş / 8 ms çıkış yumuşatması (tık yok)
+  mastering      bus kompresörü, ITU-R BS.1770-4 ölçümüyle -14 LUFS'e kazanç, 4x aşırı örneklemeli
+                 ileri bakışlı true-peak limiter (-1.5 dBTP; AAC kodlaması sonrası < -1 dBTP),
+                 sonda 0.5 sn kararma
 
-Zamanlar Blender'ın yazdığı meta.json'dan gelir (blender/scp_cinematic.py).
+Zamanlar ve sahne geometrisi Blender'ın yazdığı meta.json'dan gelir (blender/scp_cinematic.py).
 """
 import numpy as np
 from scipy import ndimage, signal
@@ -25,9 +32,11 @@ SR = 48000
 TAU = 2 * np.pi
 C_SOUND = 343.0
 
-# Sahneyle aynı geometri (blender/scp_cinematic.py, shot_contain): kamera (0,-10,0.9), araçlar
-# y=-4.5'te 14 m/s ile soldan sağa geçer; araç merkezi x=0.6'dan geçerken apc_pass anıdır.
-VEH_SPEED, VEH_Y, VEH_X_MID, LISTENER = 14.0, -4.5, 0.6, np.array([0.0, -10.0, 0.9])
+# Varsayılan sahne geometrisi (meta.json'da yoksa; blender/scp_cinematic.py, shot_contain): kamera
+# yol kenarında, araçlar y=-5.9 şeridinde 8 m/s ile +x yönünde geçer; merkez x=0'dan geçerken apc_pass.
+VEH_SPEED, VEH_Y, LISTENER, RIGHT = 8.0, -5.9, np.array([0.0, -10.4, 0.75]), np.array([0.17, 0.985, 0.0])
+TARGET_LUFS, TP_CEIL_DB = -14.0, -1.5
+DECLICK_IN, DECLICK_OUT = 0.006, 0.008
 
 
 # ---------------------------------------------------------------- temel araçlar
@@ -134,8 +143,23 @@ def convolve(x, ir):
     return np.stack([signal.fftconvolve(x[:, c], ir[:, c])[:len(x)] for c in range(2)], -1)
 
 
+def declick(x, fi=DECLICK_IN, fo=DECLICK_OUT):
+    """Baş ve sona yükseltilmiş kosinüs yumuşatma: parça hiçbir zaman sıfır olmayan örnekle
+    başlamaz ya da bitmez (dalga biçimi süreksizliği = tık)."""
+    x = np.array(x, float)
+    n = len(x)
+    a, b = min(int(fi * SR), n // 2), min(int(fo * SR), n // 2)
+    g = np.ones(n)
+    if a:
+        g[:a] = 0.5 - 0.5 * np.cos(np.pi * np.arange(a) / a)
+    if b:
+        g[n - b:] = 0.5 + 0.5 * np.cos(np.pi * np.arange(1, b + 1) / b)
+    return x * (g[:, None] if x.ndim == 2 else g)
+
+
 class Mix:
-    """Zamana yerleştirme + iki yankı göndermesi (orman: kısa/orta, büyük: uzun trailer yankısı)."""
+    """Zamana yerleştirme + iki yankı göndermesi (oda: kısa, salon: uzun trailer yankısı).
+    Her parça eklenirken yumuşatılır; t_end verilirse parça o anda (sahne sınırı) kapanır."""
 
     def __init__(self, dur):
         n = int(dur * SR)
@@ -143,10 +167,15 @@ class Mix:
         self.room = np.zeros((n, 2))
         self.hall = np.zeros((n, 2))
 
-    def add(self, sig, t0, gain=1.0, pan=0.0, room=0.0, hall=0.0, width=0.0):
+    def add(self, sig, t0, gain=1.0, pan=0.0, room=0.0, hall=0.0, width=0.0, t_end=None, fo=DECLICK_OUT):
         sig = np.asarray(sig, float) * gain
         if sig.ndim == 1:
             sig = stereo(sig, pan, width)
+        if t_end is not None:
+            sig = sig[:max(int(round((t_end - t0) * SR)), 0)]
+        if len(sig) < 2:
+            return
+        sig = declick(sig, DECLICK_IN, fo)
         i0 = int(round(t0 * SR))
         a, b = max(i0, 0), min(i0 + len(sig), len(self.dry))
         if b <= a:
@@ -155,6 +184,16 @@ class Mix:
         self.dry[a:b] += seg
         self.room[a:b] += seg * room
         self.hall[a:b] += seg * hall
+
+    def add_scene(self, sig, t0, t1, gain=1.0, pan=0.0, width=0.0, ir=None, wet=0.0, fo=0.012):
+        """Sahne sesi: yankısı yerelde eklenir ve sahne aralığında [t0, t1) kesilir; böylece
+        hiçbir sahne öğesi sonraki sahneye taşmaz. Kapanış (fo) kesmedeki vuruşun altında kalır."""
+        sig = np.asarray(sig, float)
+        if sig.ndim == 1:
+            sig = stereo(sig, pan, width)
+        if ir is not None and wet > 0:
+            sig = sig + wet * convolve(sig, ir)
+        self.add(sig, t0, gain, t_end=t1, fo=fo)
 
 
 # ---------------------------------------------------------------- dinamik işlemciler
@@ -189,13 +228,70 @@ def limit(x, ceiling_db=-1.0, lookahead=0.004, release=0.08):
     return x * g[:, None]
 
 
+# BS.1770-4 K ağırlıklandırma, 48 kHz katsayıları (ön süzgeç raf + RLB yüksek geçiren)
+K_B1 = [1.53512485958697, -2.69169618940638, 1.19839281085285]
+K_A1 = [1.0, -1.69065929318241, 0.73248077421585]
+K_B2 = [1.0, -2.0, 1.0]
+K_A2 = [1.0, -1.99004745483398, 0.99007225036621]
+
+
+def lufs(x):
+    """Bütünleşik yükseklik (ITU-R BS.1770-4): 400 ms bloklar %75 örtüşmeli, -70 LUFS mutlak ve
+    -10 LU göreli kapı."""
+    y = signal.lfilter(K_B2, K_A2, signal.lfilter(K_B1, K_A1, x, axis=0), axis=0)
+    blk, hop = int(0.4 * SR), int(0.1 * SR)
+    p = np.cumsum(np.concatenate([[0.0], (y ** 2).sum(1)]))
+    starts = np.arange(0, len(y) - blk + 1, hop)
+    z = (p[starts + blk] - p[starts]) / blk
+    lk = -0.691 + 10 * np.log10(z + 1e-15)
+    g = z[lk > -70]
+    rel = -0.691 + 10 * np.log10(g.mean()) - 10
+    g = z[(lk > -70) & (lk > rel)]
+    return -0.691 + 10 * np.log10(g.mean())
+
+
+def true_peak_db(x, os=4):
+    up = signal.resample_poly(x, os, 1, axis=0)
+    return 20 * np.log10(np.max(np.abs(up)) + 1e-12)
+
+
+def tp_limit(x, ceiling_db=TP_CEIL_DB, os=4, lookahead=0.003, release=0.08):
+    """True-peak limiter: tepe algısı 4x aşırı örneklenmiş sinyalde (örnekler arası tepeler),
+    ileri bakışlı kayan minimum + kutu ortalama saldırı (kazanç tepeye zamanında iner, basamaksız),
+    tek kutuplu bırakma."""
+    ceil = 10 ** (ceiling_db / 20)
+    up = signal.resample_poly(x, os, 1, axis=0)
+    pk = np.abs(up).max(1)[:len(x) * os].reshape(len(x), os).max(1)
+    need = np.minimum(1.0, ceil / np.maximum(pk, 1e-9))
+    L = max(int(lookahead * SR), 1)
+    m = ndimage.minimum_filter1d(need, size=L + 1, origin=-(L // 2))       # need[i .. i+L] minimumu
+    s_att = ndimage.uniform_filter1d(m, size=L + 1, origin=L // 2)           # m[i-L .. i] ortalaması
+    s_att = np.minimum(s_att, need)
+    a = np.exp(-1 / (SR * release))
+    rel = 1 - signal.lfilter([1 - a], [1, -a], 1 - s_att)
+    g = np.minimum(s_att, rel)
+    return x * g[:, None]
+
+
+def master(x, target=TARGET_LUFS, ceiling_db=TP_CEIL_DB):
+    """Hedef yüksekliğe kazanç + true-peak sınırlama; limiter yüksekliği biraz düşürdüğü için
+    birkaç turda yakınsar."""
+    y = x
+    for _ in range(6):
+        y = tp_limit(y * 10 ** ((target - lufs(y)) / 20), ceiling_db)
+        if abs(lufs(y) - target) < 0.05:
+            break
+    return y
+
+
 # ---------------------------------------------------------------- ses kaynakları
 
-def transient(rng, dur=0.06, lo=1800, hi=9000):
+def transient(rng, dur=0.08, lo=900, hi=9000):
+    """Vuruşun önü: süzülmüş gürültü patlaması, 1.5 ms yükselişli (anlık tık yok)."""
     t = tt(dur)
-    n = bp(rng.standard_normal(len(t)), lo, hi) * np.exp(-t / 0.006)
-    click = np.sin(TAU * 3200 * t) * np.exp(-t / 0.0015)
-    return norm(n + 0.5 * click)
+    n = bp(rng.standard_normal(len(t)), lo, hi) * env_exp(t, 0.0015, 0.009)
+    body = lp(rng.standard_normal(len(t)), 900) * env_exp(t, 0.002, 0.02)
+    return norm(n + 0.6 * norm(body))
 
 
 def boom(dur=2.4, f_hi=110, f_lo=38, fall=0.09, decay=0.55):
@@ -232,14 +328,16 @@ def rubble(rng, dur=2.0):
     return norm(lp(brown(len(t), rng), 220) * env_exp(t, 0.02, 0.6))
 
 
-def impact(mx, t0, rng, size=1.0, metal_base=150.0, pan=0.0):
+def impact(mx, t0, rng, size=1.0, metal_base=150.0, pan=0.0, metal_amt=1.0):
     """Trailer darbesi: geçiş + gövde + sub + metal + gürleme; ayrı yankı göndermeleri."""
     mx.add(transient(rng), t0, 0.5 * size, pan, room=0.3, hall=0.4, width=0.5)
     mx.add(boom(f_hi=105 * rng.uniform(0.95, 1.05)), t0, 0.85 * size, 0.0, hall=0.35)
     mx.add(sub_drop(), t0, 0.55 * size, 0.0)
-    m = metal(rng, base=metal_base)
-    mx.add(m, t0, 0.22 * size, pan - 0.25, hall=0.9, width=0.6)
-    mx.add(metal(rng, base=metal_base * 1.37, decay=1.0), t0 + 0.004, 0.14 * size, pan + 0.3, hall=0.9)
+    if metal_amt > 0:  # koyu, kısa çınlama (uzun süren yüksek "bip" tonu yok)
+        m = metal(rng, 1.2, metal_base, 0.75, 0.6)
+        mx.add(lp(m, 2800), t0, 0.12 * size * metal_amt, pan - 0.25, hall=0.9, width=0.6)
+        m2 = metal(rng, 1.0, metal_base * 1.37, 0.75, 0.4)
+        mx.add(lp(m2, 2400), t0 + 0.004, 0.07 * size * metal_amt, pan + 0.3, hall=0.9)
     mx.add(rubble(rng), t0 + 0.01, 0.3 * size, 0.0, hall=0.5, width=0.8)
 
 
@@ -247,10 +345,12 @@ def reverse_swell(mx, t_hit, rng, ir, dur=0.9, gain=0.35):
     """Ters yankı kabarması: gürültü patlaması yankıdan geçirilip ters çevrilir, vuruşta biter."""
     t = tt(0.25)
     src = bp(rng.standard_normal(len(t)), 300, 9000) * np.exp(-t / 0.05)
-    m = int(dur * SR)
-    wet = np.stack([signal.fftconvolve(src, ir[:m, c])[:m] for c in range(2)], -1)
+    wet = np.stack([signal.fftconvolve(src, ir[:, c]) for c in range(2)], -1)
+    on = int(np.argmax(np.abs(wet).max(1) > 0.2 * np.abs(wet).max()))  # yankının ön gecikmesi atlanır:
+    m = int(dur * SR)                                                   # ters kabarma vuruşa kadar dolu
+    wet = wet[on:on + m]
     sw = wet[::-1] * np.linspace(0, 1, len(wet))[:, None] ** 1.5
-    mx.add(norm(sw), t_hit - dur, gain)
+    mx.add(norm(sw), t_hit - len(sw) / SR, gain, fo=0.002)
 
 
 def whoosh(rng, dur, f0, f1, f_peak=None, width=0.55, curve=None):
@@ -310,10 +410,10 @@ def diesel(rng, dur, rpm, cyl=6, load=0.8):
     rumble = lp(brown(n, rng), 120) * (0.6 + 0.4 * lp(gas, 30) / (np.max(np.abs(gas)) + 1e-9))
     clatter = bp(signal.fftconvolve(knocks, rng.standard_normal(int(0.002 * SR)) * np.exp(-tt(0.002) / 0.0006))[:n],
                  1800, 7000)
-    turbo_f = 3100 * rpm_t / rpm
-    turbo = np.sin(TAU * np.cumsum(turbo_f) / SR) * (0.5 + 0.5 * np.sin(TAU * 0.3 * t))
+    turbo = bp(rng.standard_normal(n), 2900, 3400, 2) * (0.5 + 0.5 * np.sin(TAU * 0.3 * t))  # dar bant ıslık
     intake = bp(rng.standard_normal(n), 900, 2600)
-    mix = (norm(body) * 1.0 + norm(rumble) * 0.45 * load + norm(clatter) * 0.4 + turbo * 0.03 + norm(intake) * 0.07)
+    mix = (norm(body) * 1.0 + norm(rumble) * 0.45 * load + norm(clatter) * 0.4 + norm(turbo) * 0.04
+           + norm(intake) * 0.07)
     return sat(norm(mix) * 1.2, 1.6)
 
 
@@ -344,11 +444,13 @@ def rattles(rng, dur, count=7):
     return x
 
 
-def pass_by(src, t_mid, x_mid, speed, y, z, t_start, listener=LISTENER):
+def pass_by(src, t_mid, x_mid, speed, y, z, t_start, listener=LISTENER, right=RIGHT):
     """Hareketli kaynağı dinleyiciye taşır: Doppler (değişken gecikme), 1/r, hava soğurması,
-    yerden yansıma ve kulaklar arası zaman/seviye farkıyla stereo."""
+    yerden yansıma ve kulaklar arası zaman/seviye farkıyla stereo. right: kameranın sağ yönü
+    (yatay birim vektör); sol-sağ konum kaynağın bu yöndeki bileşeninden gelir."""
     n = len(src)
     t = t_start + np.arange(n) / SR
+    right = np.asarray(right, float)[:2] / np.linalg.norm(np.asarray(right, float)[:2])
 
     def path(z_src):
         x = x_mid + speed * (t - t_mid)
@@ -360,7 +462,8 @@ def pass_by(src, t_mid, x_mid, speed, y, z, t_start, listener=LISTENER):
     dry_lp = lp(src, 2200, 2)
     for z_src, refl in ((z, 1.0), (-z, 0.45)):  # direkt + yerden yansıma (zemine göre görüntü kaynak)
         d, r = path(z_src)
-        az = np.clip(d[:, 0] / np.maximum(np.hypot(d[:, 0], d[:, 1]), 1e-6), -1, 1)  # sağ-sol
+        az = np.clip((d[:, 0] * right[0] + d[:, 1] * right[1]) / np.maximum(np.hypot(d[:, 0], d[:, 1]), 1e-6),
+                     -1, 1)  # sağ-sol
         g = refl * 5.0 / np.maximum(r, 2.0)
         air = np.clip((r - 6) / 40, 0, 1)  # uzakta tizler kaybolur
         for ch, side in ((0, -1), (1, 1)):
@@ -386,62 +489,99 @@ def wind(rng, dur, gust_rate=0.25):
     return np.stack([l, r], -1) * np.clip(t / 0.3, 0, 1)[:, None]
 
 
-def hum(rng, dur, f=50.0, buzz=0.25):
-    """Trafo/lamba vızıltısı: şebeke frekansının çift harmonikleri + kesik vızıltı."""
-    t = tt(dur)
-    x = sum(a * np.sin(TAU * f * k * t + rng.uniform(0, 6)) for k, a in ((2, 1.0), (4, 0.4), (6, 0.25), (8, 0.12)))
-    saw = bp(np.sign(np.sin(TAU * 2 * f * t)), 300, 3000) * buzz
-    flick = 1 - 0.3 * (lp(rng.standard_normal(len(t)), 8) * 30 > 0.9)
-    return norm((x + saw) * flick)
-
-
-def siren(rng, dur, f_lo=520, f_hi=760, period=2.4):
-    t = tt(dur)
-    f = f_lo + (f_hi - f_lo) * (0.5 - 0.5 * np.cos(TAU * t / period))
-    ph = TAU * np.cumsum(f) / SR
-    x = sum(np.sin(k * ph) / k for k in range(1, 7))
-    return norm(lp(x, 1800))
-
-
-def radio(rng, dur=0.6):
-    """Telsiz: açılış tıkı, bant sınırlı parazit, kısa bip, kapanış 'kşş'."""
-    t = tt(dur)
-    n = len(t)
-    noise = bp(rng.standard_normal(n), 400, 3200) * (0.4 + 0.6 * (lp(rng.standard_normal(n), 25) * 25 > 0))
-    beep = np.sin(TAU * 1450 * t) * ((t > 0.05) & (t < 0.13))
-    env = np.clip(t / 0.005, 0, 1) * np.clip((dur - t) / 0.03, 0, 1)
-    click = np.zeros(n)
-    click[:60] = np.hanning(60)
-    return norm(sat((noise * 0.6 + beep * 0.5) * env + click, 3.0))
-
-
 def drone(rng, dur):
-    """Gerilim yatağı: D1-A1-D2 kümesi yavaş vuruşlarla, üstte cam gibi yüksek ton."""
+    """Gerilim yatağı (saf sinüs yok): D1-A1 kümesinde dedüne bant sınırlı testereler, yavaşça
+    açılıp kapanan alçak geçiren süzgeç, süzülmüş pembe gürültü nefesi, altta ince sub katmanı."""
     t = tt(dur)
-    low = sum(np.sin(TAU * f * t + rng.uniform(0, 6)) * a for f, a in
-              ((36.7, 1.0), (36.95, 0.8), (55.0, 0.5), (73.4, 0.35), (110.2, 0.15)))
-    air = bp(pink(len(t), rng), 120, 900) * 0.25
-    glass = sum(np.sin(TAU * f * t + rng.uniform(0, 6)) * np.sin(TAU * r * t) ** 2 for f, r in
-                ((1318.5, 0.11), (1975.5, 0.07), (2637.0, 0.05))) * 0.06
-    return norm(low + air + glass)
+    x = np.zeros(len(t))
+    for f, amp in ((36.7, 1.0), (36.92, 0.9), (55.0, 0.55), (55.3, 0.45), (73.4, 0.25)):
+        ph0 = rng.uniform(0, TAU)
+        for k in range(1, int(900 / f)):
+            x += amp / k * np.sin(TAU * f * k * t + k * ph0)
+    cut = 170 + 90 * (0.5 - 0.5 * np.cos(TAU * t / 5.3))
+    # zamanla değişen süzgeç: kısa bloklarda kesim frekansı güncellenir (yumuşak geçişli)
+    y = np.zeros_like(x)
+    blk = int(0.05 * SR)
+    win = np.hanning(2 * blk)
+    for i in range(0, len(x) - blk, blk):
+        seg = x[max(i - blk // 2, 0):i + 2 * blk - blk // 2]
+        f_seg = lp(seg, cut[min(i + blk, len(cut) - 1)], 4)
+        a = max(i - blk // 2, 0)
+        w = win[:len(f_seg)]
+        y[a:a + len(f_seg)] += f_seg * w
+    breath = bp(pink(len(t), rng), 70, 420) * (0.6 + 0.4 * np.sin(TAU * t / 3.7 + 1.0))
+    sub = np.sin(TAU * 36.7 * t) * 0.25
+    return norm(norm(y) + 0.35 * norm(breath) + sub)
+
+
+def room_tone(rng, dur):
+    """Depo oda tonu: bina gövdesinin alçak gürlemesi, havalandırma hışırtısı (süzülmüş gürültü)."""
+    n = int(dur * SR)
+    rumble = lp(brown(n, rng), 130, 4)
+    vent = peak_eq(bp(pink(n, rng), 160, 1800), 420, 4, 1.4)
+    flutter = 0.85 + 0.15 * lp(rng.standard_normal(n), 3) * 60
+    return norm(norm(rumble) * 0.9 + norm(vent) * 0.35 * np.clip(flutter, 0.6, 1.2))
+
+
+def mains_buzz(rng, dur, f=50.0, hiss=0.25):
+    """Lamba balastı / trafo vızıltısı: şebekenin iki katında sönümlü darbe dizisi (zengin
+    harmonikler, saf sinüs değil), rezonanslı bant süzgeci, tepe anlarında ark hışırtısı."""
+    n = int(dur * SR)
+    t = np.arange(n) / SR
+    ph = (2 * f * t + 0.03 * np.cumsum(rng.standard_normal(n)) / SR) % 1.0
+    pulse = np.exp(-ph / 0.07)
+    x = bp(pulse - pulse.mean(), 90, 2400)
+    x = peak_eq(peak_eq(x, 2 * f, 5, 2.0), 6 * f, 3, 2.0)
+    arc = bp(rng.standard_normal(n), 2500, 7000) * (pulse > 0.75)
+    flick = 1 - 0.25 * (lp(rng.standard_normal(n), 6) * 30 > 0.9)
+    return norm((norm(x) + hiss * norm(arc)) * flick)
+
+
+def sub_pulse(rng, dur=1.2, f0=70.0, f1=38.0, decay=0.32):
+    """Sub-bass vuruşu: perdesi düşen gövde + alçak geçirilmiş gürültü tokluğu, hafif doygun."""
+    t = tt(dur)
+    f = f1 + (f0 - f1) * np.exp(-t / 0.06)
+    body = np.sin(TAU * np.cumsum(f) / SR) * env_exp(t, 0.004, decay)
+    thud = lp(rng.standard_normal(len(t)), 180, 4) * env_exp(t, 0.003, 0.05)
+    return norm(lp(sat(body + 0.5 * norm(thud), 1.8), 220))
+
+
+def klaxon(rng, dur, period=1.15, on=0.9, f_lo=360.0, f_hi=780.0, phase=0.35):
+    """Tesis alarmı ("whoop" kornası): her periyotta yükselen perde; kare dalgaya yakın harmonikler,
+    korna rezonansları (tepe EQ), doygunluk. Mesafe ve yankı çağıran tarafta eklenir."""
+    t = tt(dur)
+    u = ((t / period) + phase) % 1.0
+    f = f_lo + (f_hi - f_lo) * np.clip(u / on, 0, 1) ** 0.6
+    ph = TAU * np.cumsum(f) / SR
+    x = sum(np.sin(k * ph) / k * (1.0 if k % 2 else 0.3) for k in range(1, 14))
+    gate = lp((u < on).astype(float), 40, 2)
+    horn = sat(norm(x) * gate * 1.4, 2.4)
+    horn = peak_eq(peak_eq(bp(horn, 280, 4200), 1150, 5, 1.3), 2400, 3, 1.5)
+    wobble = 1 + 0.04 * np.sin(TAU * 5.5 * t)
+    return norm(horn * wobble)
 
 
 # ---------------------------------------------------------------- sahne
 
 def synthesize(ev, seed=13):
+    """meta.json olaylarından 12 sn'lik stereo miks (48 kHz, float32)."""
     rng = np.random.default_rng(seed)
     end = ev["end"]
-    dur = end + 2.5
+    c1, c2, c3 = ev["cuts"]          # 3.6 sert kesme, 6.8 karartma, 9.2 logo
+    t_open = 0.4                     # siyahtan açılışın tamamlandığı an
+    dur = end + 0.5
     mx = Mix(dur)
-    c1, c2, c3 = ev["cuts"]
     ir_hall = make_ir(rng, 4.0, 3.2, 1.3, 0.03, early=((0.09, 0.4), (0.17, 0.3), (0.29, 0.2)))
     ir_room = make_ir(rng, 1.6, 1.2, 0.5, 0.012, early=((0.035, 0.5), (0.061, 0.35), (0.11, 0.25)))
+    ir_shed = make_ir(rng, 1.4, 1.1, 0.45, 0.008, early=((0.021, 0.5), (0.034, 0.4), (0.052, 0.3)))
+    ir_yard = make_ir(rng, 3.0, 2.4, 0.9, 0.06, early=((0.12, 0.5), (0.21, 0.35), (0.33, 0.25)))
+    hits = (t_open, c1, c2, c3)
 
-    # Ducking: her darbede ortam/yatak ~6 dB çekilip yavaşça geri gelir (darbeler temiz vursun).
+    # Ducking: her vuruşta yatak ~6 dB çekilip yavaşça geri gelir (vuruşlar temiz vursun)
     tl = np.arange(int(dur * SR)) / SR
     duck = np.ones_like(tl)
-    for c in (c1, c2, c3, end - 0.62):
-        d = np.clip((tl - (c - 0.04)) / 0.04, 0, 1) * np.exp(-np.maximum(tl - c, 0) / 0.6)
+    for c in hits:
+        d = np.clip((tl - c) / 0.012, 0, 1) * np.exp(-np.maximum(tl - c, 0) / 0.6)
         duck *= 1 - 0.5 * d
 
     def ducked(sig, t0):
@@ -450,74 +590,65 @@ def synthesize(ev, seed=13):
         g = np.pad(g, (0, len(sig) - len(g)), constant_values=1.0)
         return sig * (g[:, None] if np.ndim(sig) == 2 else g)
 
-    # --- gerilim yatağı ve ortam
-    dr = drone(rng, end - c1 + 1.5)
-    e = np.clip(tt(len(dr) / SR) / 0.8, 0, 1) * np.clip((len(dr) / SR - tt(len(dr) / SR)) / 1.4, 0, 1)
-    mx.add(ducked(hp(dr, 30) * e, c1 - 0.2), c1 - 0.2, 0.1, width=0.6, hall=0.2)
-    w = wind(rng, end - c1 + 1.0)
-    mx.add(ducked(w, c1 - 0.3), c1 - 0.3, 0.07, room=0.1)
-    # SECURE: lamba vızıltısı ve uzak telsiz
-    hm = hum(rng, c2 - c1 + 0.3, 50, 0.35)
-    mx.add(ducked(hm * fades(len(hm), 0.1, 0.3), c1), c1, 0.025, 0.25, room=0.3)
-    mx.add(radio(rng, 0.55), c1 + 1.15, 0.05, -0.55, room=0.6)
-    # PROTECT: tesis trafosu, uzak siren
-    mx.add(hum(rng, end - c3 + 1.0, 60, 0.15), c3 - 0.15, 0.03, 0.1, room=0.4)
-    s = siren(rng, end - c3 + 1.5)
-    mx.add(ducked(lp(s, 1100) * np.clip(tt(len(s) / SR) / 0.6, 0, 1), c3 - 0.1), c3 - 0.1, 0.05, -0.3, hall=1.0,
-           width=0.5)
+    # --- gerilim yatağı: tüm video boyunca, logoda söner (müzik katmanı; sahne sesi değil)
+    dr = drone(rng, 11.6)
+    e = np.clip(tt(11.6) / 0.35, 0, 1) * np.clip((10.9 - tt(11.6)) / 1.6, 0, 1) ** 1.5
+    mx.add(ducked(hp(dr, 28) * e, 0.0), 0.0, 0.16, width=0.6, hall=0.15)
 
-    # --- açılış: siyah ekranda emme, 1. darbe
-    mx.add(whoosh(rng, 0.9, 120, 2500, 1800, 0.6, np.linspace(0, 1, 64) ** 2.5), c1 - 0.9, 0.35, room=0.2)
-    reverse_swell(mx, c1, rng, ir_hall, 0.8, 0.28)
-    impact(mx, c1, rng, 1.0, 140)
+    # --- DEPO (0 - 3.6): oda tonu, lamba balastı, kapıdan rüzgâr, sub-bass vuruşları
+    mx.add_scene(ducked(room_tone(rng, c1), 0.0), 0.0, c1, 0.085, width=0.7, ir=ir_shed, wet=0.3)
+    bz = mains_buzz(rng, c1, 50, 0.2)
+    mx.add_scene(bz, 0.0, c1, 0.018, 0.25, ir=ir_shed, wet=0.5)
+    w = wind(rng, c1)
+    mx.add_scene(lp(w, 900), 0.0, c1, 0.05, ir=ir_shed, wet=0.4)
+    for tp, g in ((1.55, 0.32), (2.55, 0.36)):
+        mx.add(sub_pulse(rng), tp, g, hall=0.1, t_end=c1)
 
-    # --- SECURE: kasa yığını önden kayar (sağdan sola), metal tıngırtılar, başlık parıltısı
-    p0, p1 = ev["crate_pass"]
-    wsh = whoosh(rng, 0.75, 200, 900, 1400, 0.5)
-    mx.add(stereo(wsh, np.linspace(0.8, -0.8, len(wsh))), p0 + 0.02, 0.4, room=0.2)
-    for dt_, base in ((0.18, 620), (0.41, 910), (0.66, 480)):
-        mx.add(metal(rng, 0.6, base, 0.85, 0.25), p0 + dt_, 0.06, rng.uniform(-0.5, 0.5), room=0.5)
-    mx.add(boom(0.5, 160, 90, 0.03, 0.12), p0 + 0.08, 0.18, 0.3, room=0.4)  # ahşap tok
-    sh = whoosh(rng, 0.6, 3000, 9000, 7000, 0.4, np.linspace(1, 0, 64) ** 2)
-    mx.add(sh, p1 - 0.05, 0.08, 0.0, hall=0.6, width=0.8)
-
-    # --- geçiş 1 -> 2 (CONTAIN): ters kabarma + braam + darbe
-    reverse_swell(mx, c2, rng, ir_hall, 0.9, 0.3)
-    mx.add(braam(rng, 2.0, 36.7), c2, 0.32, hall=0.35, width=0.5)
-    impact(mx, c2, rng, 0.95, 120)
-
-    # --- araç konvoyu: motor + lastik + tıngırtı, Doppler'li geçiş (önceden duyulur: J-cut)
+    # --- YOL (3.6 - 6.8): iki zırhlı araç (motor + lastik + tıngırtı), Doppler'li geçiş, rüzgâr
+    lst = np.array(ev.get("listener", LISTENER), float)
+    right = np.array(ev.get("listener_right", RIGHT), float)
+    speed = ev.get("apc_speed", VEH_SPEED)
+    wr = wind(rng, c2 - c1)
+    mx.add_scene(ducked(wr, c1), c1, c2, 0.075, ir=ir_room, wet=0.2)
     for i, t_mid in enumerate(ev["apc_pass"]):
-        t_start = c2 - 0.9
-        n_dur = end - t_start
-        eng = diesel(rng, n_dur, 1500 + 140 * i)
-        tyr = tires_gravel(rng, n_dur, ev.get("apc_speed", VEH_SPEED))
-        rat = rattles(rng, n_dur, 6)
-        src = eng * 0.9 + tyr * 0.55 + rat * 0.35
-        lane_y = ev.get("apc_lanes", [VEH_Y, VEH_Y - 0.15])[i]  # sahnedeki şerit (uzak araç daha kısık/boğuk)
-        st = pass_by(src, t_mid, VEH_X_MID, ev.get("apc_speed", VEH_SPEED), lane_y, 1.1, t_start)
-        fade = np.clip((tt(n_dur) - 0.3) / 0.6, 0, 1) * np.clip((c3 + 0.6 - (t_start + tt(n_dur))) / 0.5, 0, 1)
-        mx.add(st * fade[:, None], t_start, 0.75, room=0.25)
-        # geçişin dibinde hava kütlesi: kısa, alçak whoosh
+        n_dur = c2 - c1
+        eng = diesel(rng, n_dur, 1500 + 160 * i)
+        tyr = tires_gravel(rng, n_dur, speed)
+        rat = rattles(rng, n_dur, 5)
+        src = eng * 0.9 + tyr * 0.5 + rat * 0.3
+        lane_y = ev.get("apc_lanes", [VEH_Y, VEH_Y])[i]
+        st = pass_by(src, t_mid, 0.0, speed, lane_y, 1.1, c1, listener=lst, right=right)
+        mx.add_scene(st, c1, c2, 0.62, ir=ir_room, wet=0.25)
+        # geçişin dibinde hava kütlesi: kısa, alçak whoosh, sağa doğru
         ws = whoosh(rng, 0.7, 150, 600, 400, 0.6)
-        near = min(1.0, 5.5 / abs(lane_y - LISTENER[1]))
-        mx.add(stereo(ws, np.linspace(-0.9, 0.9, len(ws))), t_mid - 0.35, 0.25 * near ** 1.5, room=0.15)
+        mx.add(stereo(ws, np.linspace(0.1, 0.95, len(ws))), t_mid - 0.4, 0.22, room=0.1, t_end=c2)
 
-    # --- geçiş 2 -> 3 (PROTECT)
-    reverse_swell(mx, c3, rng, ir_hall, 0.9, 0.3)
-    impact(mx, c3, rng, 0.9, 165)
-    mx.add(braam(rng, 1.8, 41.2, 0.8), c3, 0.22, hall=0.4, width=0.5)
+    # --- TESİS (6.8 - 9.2): uzak alarm kornası, trafo vızıltısı, rüzgâr
+    al = klaxon(rng, c3 - c2 + 0.2)
+    al = lp(al, 2600)
+    mx.add_scene(ducked(stereo(al, -0.25, 0.6), c2), c2, c3, 0.11, ir=ir_yard, wet=1.6)
+    mx.add_scene(mains_buzz(rng, c3 - c2, 60, 0.1), c2, c3, 0.02, 0.15, ir=ir_yard, wet=0.3)
+    mx.add_scene(ducked(wind(rng, c3 - c2), c2), c2, c3, 0.06, ir=ir_yard, wet=0.2)
+    for tp, g in ((8.15, 0.24), (8.55, 0.3), (8.8, 0.34), (8.98, 0.38)):  # logoya doğru hızlanan nabız
+        mx.add(sub_pulse(rng, 0.6, 75, 40, 0.18), tp, g, t_end=c3)
 
-    # --- harflerin altından geçiş: yakın, hızlı, iki yana açılan whoosh
-    x = ev["through_text"]
-    for side in (-1, 1):
-        ws = whoosh(rng, 0.8, 250, 5000, 3500, 0.45)
-        mx.add(stereo(ws, np.linspace(0, 0.85 * side, len(ws))), x - 0.5, 0.3, room=0.15)
-    # --- kapanış: büyük darbe + braam, kararmayla birlikte söner
-    t_end = end - 0.62
-    reverse_swell(mx, t_end, rng, ir_hall, 1.0, 0.35)
-    impact(mx, t_end, rng, 1.25, 110)
-    mx.add(braam(rng, 2.4, 36.7, 1.1), t_end, 0.38, hall=0.5, width=0.5)
+    # --- yazı aksanları: kelime belirirken yumuşak, alçak "fısıltı" (kelime başına aynı)
+    for tw in ev.get("words", (0.9, 4.0, 7.0)):
+        sw = whoosh(rng, 0.5, 2600, 700, 1500, 0.5, np.sin(np.pi * np.linspace(0, 1, 64) ** 0.6) ** 2)
+        mx.add(sw, tw - 0.05, 0.05, 0.0, room=0.3, width=0.7)
+
+    # --- vuruşlar: açılış, iki kesme, logo (en büyük); öncesinde ters yankı kabarması
+    swell = {t_open: (0.38, 0.22), c1: (0.85, 0.3), c2: (0.85, 0.3), c3: (0.95, 0.38)}
+    for c, size, mb, ma in ((t_open, 0.75, 120, 0.0), (c1, 0.95, 115, 0.8), (c2, 0.92, 105, 0.8), (c3, 1.35, 95, 1.0)):
+        d_sw, g_sw = swell[c]
+        reverse_swell(mx, c, rng, ir_hall, d_sw, g_sw)
+        impact(mx, c, rng, size, mb, metal_amt=ma)
+    mx.add(braam(rng, 2.0, 36.7, 0.9), c1, 0.3, hall=0.35, width=0.5)
+    mx.add(braam(rng, 1.8, 41.2, 0.8), c2, 0.24, hall=0.4, width=0.5)
+    mx.add(braam(rng, 2.6, 36.7, 1.1), c3, 0.42, hall=0.55, width=0.5)
+    mx.add(sub_drop(2.8, 58, 24), c3, 0.45)
+    ws = whoosh(rng, 0.9, 150, 4000, 2500, 0.6, np.linspace(0, 1, 64) ** 2.2)  # logoya emme
+    mx.add(ws, c3 - 0.9, 0.2, room=0.2, width=0.6)
 
     # --- yankılar, ses eşitleme, mastering
     wet = convolve(mx.room, ir_room) * 0.45 + convolve(mx.hall, ir_hall) * 0.6
@@ -525,12 +656,26 @@ def synthesize(ev, seed=13):
     mixd = hp(mixd, 22, 2)                       # DC/infra
     mixd = peak_eq(mixd, 250, -2.0, 0.8)         # çamur temizliği
     mixd = peak_eq(mixd, 3500, 1.5, 0.9)         # netlik
-    mixd = mixd + 0.12 * hp(mixd, 7000, 2)       # hava (yüksek raf)
-    mixd = norm(mixd) * 0.9                       # tepe -1 dB civarı; aradaki sessizlik korunur
-    mixd = compress(mixd, -14, 2.0, 0.02, 0.25, makeup_db=1.0)
+    mixd = mixd + 0.1 * hp(mixd, 7000, 2)        # hava (yüksek raf)
+    mixd = norm(mixd) * 0.5
+    mixd = compress(mixd, -20, 2.2, 0.015, 0.22, makeup_db=0.0)
     mixd = sat(mixd, 1.05)
-    out = limit(mixd, -1.0)
+    n = int(end * SR)
+    mixd = mixd[:n]
+    fo = int(0.5 * SR)                            # son 0.5 sn: yumuşak kararma (aniden kesilmez)
+    g = np.ones(n)
+    g[n - fo:] = 0.5 + 0.5 * np.cos(np.pi * np.arange(1, fo + 1) / fo)
+    mixd = declick(mixd * g[:, None], DECLICK_IN, 0.0)
+    out = master(mixd)
     return out.astype(np.float32)
+
+
+def report(x):
+    """Ölçüm özeti: bütünleşik yükseklik, true peak, son 0.5 sn ve tail seviyeleri."""
+    seg = lambda a, b: 20 * np.log10(np.sqrt(np.mean(x[int(a * SR):int(b * SR)] ** 2)) + 1e-12)
+    return {"lufs": round(lufs(x), 2), "true_peak_dbtp": round(true_peak_db(x), 2),
+            "rms_9.2-10.0": round(seg(9.2, 10.0), 1), "rms_10.7-11.5": round(seg(10.7, 11.5), 1),
+            "rms_11.9-12.0": round(seg(11.9, 12.0), 1), "last_sample": float(np.abs(x[-1]).max())}
 
 
 if __name__ == "__main__":
@@ -542,4 +687,4 @@ if __name__ == "__main__":
     meta = json.loads(Path(sys.argv[1]).read_text())
     audio = synthesize(meta)
     write_wav(sys.argv[2], audio)
-    print("yazıldı", sys.argv[2], audio.shape)
+    print("yazıldı", sys.argv[2], audio.shape, report(audio))
