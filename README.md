@@ -172,6 +172,7 @@ python3.11 blender/scp_cinematic.py --preview --still 110,300,480   # tek tek ö
 - `scp_sound.py` - ses tasarımı (numpy + scipy ile sentez): her parçada 6/8 ms yumuşatma,
   BS.1770-4 ile -14 LUFS, 4x aşırı örneklemeli true-peak limiter (-1.5 dBTP)
 - `scp_check.py` - son kontrol: her 0.25 sn'de kare, spektrogram, ebur128, tık taraması
+  (son çalıştırmanın çıktısı: `output/kontrol/` - kare sayfaları, spektrogram, `rapor.json`)
 - `assets/brand/game_logo.png` - oyun logosu (final kartında ve tesis kapısında)
 - `assets/models/` - dış modeller (bkz. `assets/models/README.md`, `CREDITS.md`); M4A1: Lolik123654
   (Sketchfab, CC BY 4.0) - videoyu paylaşırken açıklamaya yazılmalı
