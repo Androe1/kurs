@@ -4,7 +4,7 @@
   "description": "Bir madalyonun iki yüzü: 3B madalyon animasyonu (Three.js) ve MP4 çıktısı",
   "scripts": {
     "build": "python3 build.py node_modules/@fontsource/cinzel/files",
-    "render": "node render.js --pr 1.5"
+    "render": "node render.js --sub 8"
   },
   "dependencies": {
     "three": "0.160.0",

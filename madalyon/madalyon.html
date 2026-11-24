@@ -20,8 +20,6 @@ html,body{height:100%;margin:0;background:var(--night);overflow:hidden}
 #horizon{position:absolute;left:0;right:0;top:50%;height:2px;margin-top:-1px;pointer-events:none;
   background:linear-gradient(90deg,transparent 0%,var(--glow) 30%,#fff 50%,var(--glow) 70%,transparent 100%);
   box-shadow:0 0 18px 2px rgba(255,240,210,.55);transform:scaleX(0);opacity:0}
-#vignette{position:absolute;inset:0;pointer-events:none;
-  background:radial-gradient(ellipse 75% 70% at 50% 50%,transparent 55%,rgba(0,0,0,.28) 100%)}
 .cap{position:absolute;margin:0;pointer-events:none;font-family:var(--serif);font-weight:400;
   letter-spacing:.24em;font-size:clamp(18px,2.3vw,46px);line-height:1;white-space:nowrap;opacity:0}
 #capTop{color:var(--ink);left:max(16px,7vw);top:24%}
@@ -40,7 +38,6 @@ html,body{height:100%;margin:0;background:var(--night);overflow:hidden}
 
 <div id="stage">
   <div id="horizon"></div>
-  <div id="vignette"></div>
   <p class="cap" id="capTop">BİR MADALYONUN</p>
   <p class="cap" id="capBot">İKİ YÜZÜ</p>
   <button id="replay" type="button">Baştan oynat</button>
@@ -52,6 +49,8 @@ html,body{height:100%;margin:0;background:var(--night);overflow:hidden}
 <script type="module">
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 const Q = new URLSearchParams(location.search);
 const RENDER = Q.has('render');
@@ -74,9 +73,7 @@ const rnd = () => (seed = (seed * 16807) % 2147483647, (seed - 1) / 2147483646);
 const stage = document.getElementById('stage');
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: RENDER });
 renderer.setPixelRatio(RENDER ? +(Q.get('pr') || 1) : Math.min(devicePixelRatio, 2));
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.0;
-renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.NoToneMapping;          // ton eşleme son geçişte yapılır (HDR → bloom → ton)
 renderer.autoClear = false;
 stage.prepend(renderer.domElement);
 const maxAniso = renderer.capabilities.getMaxAnisotropy();
@@ -368,32 +365,35 @@ const bot = buildMedallion({ faceF: mirF, faceB: mirB, rimF: rimDark, rimB: rimG
 bot.outer.scale.y = -1;
 sceneBot.add(bot.outer);
 
-// ışıklar
-const keyTop = new THREE.DirectionalLight(0xfff0d8, 2.2); keyTop.position.set(-3, 5, 6);
-const fillTop = new THREE.DirectionalLight(0xdfe8ff, .7); fillTop.position.set(4, 1, 3);
-sceneTop.add(keyTop, fillTop, new THREE.HemisphereLight(0xffffff, 0xd9cdb4, .35));
-const rimBot = new THREE.DirectionalLight(0x8ea8ff, 3.2); rimBot.position.set(-4, -3, -3);
-const keyBot = new THREE.DirectionalLight(0xb8c8ff, .9); keyBot.position.set(3, -1, 5);
-sceneBot.add(rimBot, keyBot);
-const orbLight = new THREE.PointLight(0xffc77a, 1.6, 2.2, 2);
-orbLight.position.set(.11 * FACE_R, 0, .32);
+/* ---------- ışık düzeni ----------
+   Aydınlık dünya: sıcak anahtar ışık (yüzeyde gezer), arkadan sıcak kontur, soğuk dolgu.
+   Karanlık dünya: arkadan soğuk ay konturu, zayıf ay anahtarı, kürenin kendi sıcak ışığı. */
+const keyTop = new THREE.DirectionalLight(0xfff0d8, 2.4); keyTop.position.set(-3, 5, 6);
+const fillTop = new THREE.DirectionalLight(0xdfe8ff, .55); fillTop.position.set(5, .5, 3);
+const backTop = new THREE.DirectionalLight(0xfff4e2, 3.2); backTop.position.set(1.5, 4, -6);
+sceneTop.add(keyTop, fillTop, backTop, new THREE.HemisphereLight(0xffffff, 0xd9cdb4, .3));
+const rimBot = new THREE.DirectionalLight(0x8ea8ff, 4.2); rimBot.position.set(-3, -3, -5);
+const rimBot2 = new THREE.DirectionalLight(0x6f86ff, 2.0); rimBot2.position.set(4, -1.5, -4);
+const keyBot = new THREE.DirectionalLight(0xb8c8ff, .7); keyBot.position.set(3, -1, 5);
+sceneBot.add(rimBot, rimBot2, keyBot);
+const orbLight = new THREE.PointLight(0xffc77a, 2, 2.4, 2);
+orbLight.position.set(.11 * FACE_R, 0, .3);
 bot.inner.add(orbLight);
 
-// küre parıltısı
+// küre parıltısı (bloom'u destekleyen yumuşak hale)
 function glowTexture() {
   const cv = document.createElement('canvas'); cv.width = cv.height = 256;
   const x = cv.getContext('2d'), g = x.createRadialGradient(128, 128, 0, 128, 128, 128);
-  g.addColorStop(0, 'rgba(255,244,214,1)'); g.addColorStop(.18, 'rgba(255,214,140,.55)');
-  g.addColorStop(.5, 'rgba(255,170,80,.12)'); g.addColorStop(1, 'rgba(255,150,60,0)');
+  g.addColorStop(0, 'rgba(255,244,214,1)'); g.addColorStop(.18, 'rgba(255,214,140,.5)');
+  g.addColorStop(.5, 'rgba(255,170,80,.1)'); g.addColorStop(1, 'rgba(255,150,60,0)');
   x.fillStyle = g; x.fillRect(0, 0, 256, 256); return tex(cv, true);
 }
-const glowTex = glowTexture();
-const orbGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+const orbGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
 orbGlow.position.set(.11 * FACE_R, 0, .1); orbGlow.scale.setScalar(.9);
 bot.inner.add(orbGlow);
 
 // karanlık dünyada yıldızlar, aydınlık dünyada koyu toz zerreleri
-function points(n, gen, color, additive, sizeK) {
+function points(n, gen, color, additive, sizeK, gain) {
   const pos = new Float32Array(n * 3), size = new Float32Array(n), ph = new Float32Array(n);
   for (let i = 0; i < n; i++) { const p = gen(); pos.set(p.slice(0, 3), i * 3); size[i] = p[3]; ph[i] = rnd(); }
   const g = new THREE.BufferGeometry();
@@ -402,7 +402,7 @@ function points(n, gen, color, additive, sizeK) {
   g.setAttribute('aPh', new THREE.BufferAttribute(ph, 1));
   const mat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
-    uniforms: { uTime: { value: 0 }, uFade: { value: 0 }, uPR: { value: renderer.getPixelRatio() }, uCol: { value: new THREE.Color(color) }, uK: { value: sizeK }, uRise: { value: 0 } },
+    uniforms: { uTime: { value: 0 }, uFade: { value: 0 }, uPR: { value: 1 }, uCol: { value: new THREE.Color(color).multiplyScalar(gain) }, uK: { value: sizeK }, uRise: { value: 0 } },
     vertexShader: `attribute float aSize; attribute float aPh; uniform float uTime,uPR,uK,uFade,uRise; varying float vA;
       void main(){ vec3 p=position; p.y+=uRise*(0.25+aPh*0.5); p.x+=sin(uTime*.3+aPh*20.)*uRise*.08;
         vec4 mv=modelViewMatrix*vec4(p,1.); gl_Position=projectionMatrix*mv;
@@ -413,123 +413,189 @@ function points(n, gen, color, additive, sizeK) {
   return new THREE.Points(g, mat);
 }
 seed = 99;
-const stars = points(900, () => [(rnd() - .5) * 90, -.2 - Math.pow(rnd(), 1.4) * 22, -14 - rnd() * 50, 1.5 + Math.pow(rnd(), 6) * 7], 0xfff4e0, true, 60);
+const stars = points(900, () => [(rnd() - .5) * 90, -.2 - Math.pow(rnd(), 1.4) * 22, -14 - rnd() * 50, 1.5 + Math.pow(rnd(), 6) * 7], 0xfff4e0, true, 60, 2.2);
 sceneBot.add(stars);
-const motes = points(160, () => [(rnd() - .5) * 14, .3 + rnd() * 5, -8 + rnd() * 9, 1.4 + rnd() * 2.6], 0x2a2930, false, 30);
+const motes = points(140, () => [(rnd() - .5) * 14, .3 + rnd() * 5, -8 + rnd() * 9, 1.4 + rnd() * 2.6], 0x2a2930, false, 30, 1);
 sceneTop.add(motes);
 
-// ayna yüzeyi
+// ayna yüzeyi: Fresnel'e göre koyulaşan cam, madalyon yaklaşınca altında ışık havuzu
 const mirrorMat = new THREE.ShaderMaterial({
   transparent: true, depthWrite: false,
-  uniforms: { uMed: { value: new THREE.Vector3() }, uPool: { value: 0 } },
+  uniforms: { uPool: { value: 0 } },
   vertexShader: `varying vec3 vW; void main(){ vec4 w=modelMatrix*vec4(position,1.); vW=w.xyz; gl_Position=projectionMatrix*viewMatrix*w; }`,
-  fragmentShader: `varying vec3 vW; uniform vec3 uMed; uniform float uPool;
-    void main(){ float d=length(vW.xz-uMed.xz); float pool=exp(-d*d*.7)*uPool; float fade=exp(-length(vW-cameraPosition)*.025);
-      vec3 c=vec3(1.,.9,.74)*pool*.55+vec3(.55,.65,1.)*.05; gl_FragColor=vec4(c,(pool*.45+.10)*fade); }`,
+  fragmentShader: `varying vec3 vW; uniform float uPool;
+    void main(){ vec3 v=normalize(cameraPosition-vW); float fres=pow(1.-abs(v.y),5.);
+      float d=length(vW.xz); float pool=exp(-d*d*.7)*uPool; float fade=exp(-length(vW-cameraPosition)*.025);
+      vec3 c=vec3(1.,.88,.7)*pool*1.4+vec3(.5,.62,1.)*.06;
+      gl_FragColor=vec4(c,clamp((pool*.5+.18*(1.-fres))*fade,0.,1.)); }`,
 });
 const mirror = new THREE.Mesh(new THREE.PlaneGeometry(400, 400).rotateX(-Math.PI / 2), mirrorMat);
 const sceneMirror = new THREE.Scene(); sceneMirror.add(mirror);
 
-// arka plan (ekran uzayı)
+// arka plan: tasarım renkleri ekran rengi olarak yazılır, ton eşlemenin tersinden geçirilip doğrusal HDR'a çevrilir
+const EXPOSURE = 1.5;
+const TONEMAP_GLSL = `
+  vec3 tm(vec3 x){ return clamp((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14),0.,1.); }
+  vec3 invTm(vec3 y){ y=clamp(y,0.,.985); vec3 A=2.43*y-2.51, B=.59*y-.03, C=.14*y;
+    return (-B-sqrt(max(B*B-4.*A*C,0.)))/(2.*A); }`;
 const bgMat = new THREE.ShaderMaterial({
   depthTest: false, depthWrite: false,
-  uniforms: { uTop: { value: 0 }, uBot: { value: 0 }, uAsp: { value: 1 }, uTime: { value: 0 }, uFlash: { value: 0 },
+  uniforms: { uTop: { value: 0 }, uBot: { value: 0 }, uAsp: { value: 1 }, uFlash: { value: 0 },
               uSun: { value: new THREE.Vector2(.5, .7) }, uMoon: { value: new THREE.Vector2(.5, .3) } },
   vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }`,
-  fragmentShader: `varying vec2 vUv; uniform float uTop,uBot,uAsp,uTime,uFlash; uniform vec2 uSun,uMoon;
-    float hash(vec2 p){ return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453); }
+  fragmentShader: `varying vec2 vUv; uniform float uTop,uBot,uAsp,uFlash; uniform vec2 uSun,uMoon; ${TONEMAP_GLSL}
     void main(){ vec2 uv=vUv, A=vec2(uAsp,1.); vec3 col;
       if(uv.y>=.5){ float k=(uv.y-.5)*2.;
-        col=mix(vec3(.985,.968,.935),vec3(.80,.83,.875),pow(k,.75));
-        float d=length((uv-uSun)*A); col+=vec3(1.,.94,.82)*.20*exp(-d*d*7.);
+        col=mix(vec3(.975,.958,.925),vec3(.78,.81,.86),pow(k,.75));
+        float d=length((uv-uSun)*A); col+=vec3(1.,.94,.82)*.18*exp(-d*d*7.);
         col=mix(vec3(0.),col,uTop);
       } else { float k=(.5-uv.y)*2.;
         col=mix(vec3(.07,.085,.135),vec3(.006,.008,.014),pow(k,.5));
         float d=length((uv-uMoon)*A); col+=vec3(.28,.36,.62)*.15*exp(-d*d*6.);
         col*=uBot; }
-      float hb=exp(-abs(uv.y-.5)*70.); col+=vec3(1.,.93,.8)*hb*(.12*uBot+uFlash*.5);
-      col+=(hash(uv*1024.+fract(uTime))-.5)*(2./255.);
-      gl_FragColor=vec4(col,1.); }`,
+      vec3 lin=invTm(pow(clamp(col,0.,1.),vec3(2.2)))/${EXPOSURE.toFixed(3)};
+      float hb=exp(-abs(uv.y-.5)*(uAsp*700.)); lin+=vec3(1.,.9,.75)*hb*(uFlash*14.+uBot*.4);
+      gl_FragColor=vec4(lin,1.); }`,
 });
 const bgScene = new THREE.Scene();
 const bgQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), bgMat); bgQuad.frustumCulled = false; bgScene.add(bgQuad);
 const bgCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+/* ---------- post: HDR hedef → bloom → alt-kare birikimi (hareket bulanıklığı + AA) → ton eşleme ---------- */
+const rtOpts = { type: THREE.HalfFloatType, depthBuffer: true };
+const rtScene = new THREE.WebGLRenderTarget(4, 4, { ...rtOpts, samples: 4 });
+const rtAcc = new THREE.WebGLRenderTarget(4, 4, { type: THREE.FloatType, depthBuffer: false });
+const bloom = new UnrealBloomPass(new THREE.Vector2(4, 4), .5, .45, 7.5);
+const accQuad = new FullScreenQuad(new THREE.ShaderMaterial({
+  uniforms: { tSrc: { value: null }, uW: { value: 1 } }, blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, transparent: true,
+  vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }`,
+  fragmentShader: `uniform sampler2D tSrc; uniform float uW; varying vec2 vUv; void main(){ gl_FragColor=vec4(texture2D(tSrc,vUv).rgb*uW,1.); }`,
+}));
+const finalQuad = new FullScreenQuad(new THREE.ShaderMaterial({
+  uniforms: { tAcc: { value: null }, uTime: { value: 0 }, uAsp: { value: 1 }, uExp: { value: EXPOSURE } }, depthTest: false, depthWrite: false,
+  vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }`,
+  fragmentShader: `uniform sampler2D tAcc; uniform float uTime,uAsp,uExp; varying vec2 vUv; ${TONEMAP_GLSL}
+    float hash(vec2 p){ return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453); }
+    vec3 srgb(vec3 c){ return mix(c*12.92,1.055*pow(c,vec3(1./2.4))-.055,step(.0031308,c)); }
+    void main(){ vec2 c=vUv-.5; float r2=dot(c*vec2(uAsp,1.),c*vec2(uAsp,1.));
+      vec2 ca=c*.0016*r2*4.;                                     // kenarlarda çok hafif renk sapması
+      vec3 col=vec3(texture2D(tAcc,vUv+ca).r,texture2D(tAcc,vUv).g,texture2D(tAcc,vUv-ca).b)*uExp;
+      col=tm(col);
+      col*=mix(1.,.78,smoothstep(.25,1.4,r2));                   // vinyet
+      col=srgb(col);
+      col+=(hash(vUv*vec2(1931.,1117.)+fract(uTime*7.3))-.5)*(3./255.);   // film greni
+      gl_FragColor=vec4(col,1.); }`,
+}));
 
 /* ---------- kamera ---------- */
 const camera = new THREE.PerspectiveCamera(30, 16 / 9, .1, 200);
 const CAM_Y = .1;
 const clipTop = [new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)];
 const clipBot = [new THREE.Plane(new THREE.Vector3(0, -1, 0), 0)];
-
+let W = 1, H = 1;
 function resize() {
-  const w = stage.clientWidth, h = stage.clientHeight;
+  const w = stage.clientWidth, h = stage.clientHeight, pr = renderer.getPixelRatio();
   renderer.setSize(w, h, false);
+  W = Math.round(w * pr); H = Math.round(h * pr);
+  rtScene.setSize(W, H); rtAcc.setSize(W, H); bloom.setSize(W, H);
   camera.aspect = w / h; camera.updateProjectionMatrix();
-  bgMat.uniforms.uAsp.value = w / h;
+  bgMat.uniforms.uAsp.value = finalQuad.material.uniforms.uAsp.value = w / h;
+  stars.material.uniforms.uPR.value = motes.material.uniforms.uPR.value = pr;
 }
 addEventListener('resize', resize); resize();
 
+/* ---------- fizik ----------
+   Düşüş: yerçekimiyle serbest düşüş, sonra aynanın "kaldırma alanı" onu sönümlü bir yay gibi yakalar.
+   Dönüş: açısal hız sürtünmeyle üstel olarak söner; hızla orantılı bir presesyon yalpası eşlik eder.
+   Çevirmeler: hedef açıya yay ile gider (hafif aşım + oturma); açısal hız madalyonu hafifçe kaldırır,
+   açısal ivme ise eylemsizlikle ters yöne yatırır. Hepsi t'nin saf fonksiyonu: her kare yeniden üretilebilir. */
+const G = 5.5, Y0 = 4.8, Y_CATCH = 2.1, HOVER_Y = 1.16, T_DROP = 1.1;
+const T_FALL = Math.sqrt(2 * (Y0 - Y_CATCH) / G), V_CATCH = G * T_FALL;
+const SPR_W = 7, SPR_Z = .65;
+function spring(x0, v0, w, z, tau) {
+  const wd = w * Math.sqrt(1 - z * z), e = Math.exp(-z * w * tau);
+  return e * (x0 * Math.cos(wd * tau) + (v0 + z * w * x0) / wd * Math.sin(wd * tau));
+}
+const stepResp = (tau, w, z) => tau <= 0 ? 0 : 1 - spring(1, 0, w, z, tau);
+function dropY(t) {
+  const tau = t - T_DROP;
+  if (tau <= 0) return Y0;
+  if (tau < T_FALL) return Y0 - .5 * G * tau * tau;
+  return HOVER_Y + spring(Y_CATCH - HOVER_Y, -V_CATCH, SPR_W, SPR_Z, tau - T_FALL);
+}
+// en yakın yaklaşma anı (iniş parlaması bu ana bağlanır)
+let T_LAND = T_DROP + T_FALL, minY = 9;
+for (let t = T_DROP + T_FALL; t < T_DROP + T_FALL + 1.5; t += .002) { const y = dropY(t); if (y < minY) { minY = y; T_LAND = t; } }
+
+const REST = .42, SPIN = Math.PI * 4, SPIN_K = 1.35;
+const FLIPS = [5.3, 7.35], FLIP_W = 4.4, FLIP_Z = .62;
+const flipAngle = t => FLIPS.reduce((a, tf) => a + Math.PI * stepResp(t - tf, FLIP_W, FLIP_Z), 0);
+const d1 = (f, t, h = 1 / 240) => (f(t + h) - f(t - h)) / (2 * h);
+const flipPeak = Math.PI * FLIP_W * 1.1;
+
+function medallionState(t) {
+  const tau = Math.max(0, t - T_DROP);
+  const idle = sm(seg(t, T_LAND, T_LAND + 1.2));
+  let y = dropY(t)
+    + (Math.sin(t * 1.31) * .028 + Math.sin(t * 2.87 + 1.3) * .012) * idle;   // süzülme: uyumsuz frekanslar, tekrar etmeyen nefes
+  const flipV = d1(flipAngle, t), flipA = d1(tt => d1(flipAngle, tt), t);
+  y += .14 * Math.min(1, Math.abs(flipV) / flipPeak);                        // dönerken hafif yükselme
+  const wob = .32 * Math.exp(-1.5 * tau) * (t > T_DROP ? 1 : 0);
+  const yaw = REST - SPIN * Math.exp(-SPIN_K * tau) + flipAngle(t) + Math.sin(t * .71) * .05 * idle;
+  const rx = -.07 + wob * Math.sin(7.2 * tau) + Math.sin(t * .93 + 2) * .018 * idle;
+  const rz = .075 + wob * .8 * Math.cos(7.2 * tau) - clamp(flipA / 260, -.09, .09);
+  return { y, yaw, rx, rz };
+}
+
 /* ---------- zaman çizelgesi ---------- */
-const REST = .42, HOVER_Y = 1.1;
 const $h = document.getElementById('horizon'), $t = document.getElementById('capTop'), $b = document.getElementById('capBot');
 const tmp = new THREE.Vector3();
 
-function renderAt(t) {
-  // ufuk çizgisi ve dünyaların doğuşu
+function updateScene(t) {
+  const land = Math.exp(-Math.pow((t - T_LAND) * 4, 2));
   const line = eOut(seg(t, .25, 1.5));
-  const land = Math.exp(-Math.pow((t - 3.55) * 3.2, 2));
-  $h.style.transform = `scaleX(${line})`; $h.style.opacity = Math.min(1, line * 1.4) * (.75 + .25 * land);
   const dawn = sm(seg(t, .9, 3.0)), dusk = sm(seg(t, .7, 2.6));
   bgMat.uniforms.uTop.value = dawn; bgMat.uniforms.uBot.value = dusk;
-  bgMat.uniforms.uFlash.value = land * .6 + (1 - seg(t, .25, 1.6)) * line * .5;
-  bgMat.uniforms.uTime.value = t;
+  bgMat.uniforms.uFlash.value = land * .9 + (1 - seg(t, .25, 1.8)) * line * .7;
 
-  // madalyon: yukarıdan dönerek iner, süzülür, iki kez yarım tur atar
-  const pIn = seg(t, 1.0, 3.6), eIn = eOut(pIn);
-  const idle = sm(seg(t, 3.3, 4.2));
-  let y = lerp(4.9, HOVER_Y, eIn) + Math.sin((t - 3.6) * 1.7) * .04 * idle;
-  let yaw = REST - Math.PI * 4 * (1 - eIn) + Math.sin((t - 3.6) * .9) * .06 * idle;
-  yaw += Math.PI * eInOut(seg(t, 5.3, 6.5)) + Math.PI * eInOut(seg(t, 7.2, 8.4));
-  const wob = (1 - eIn) * .35;
-  top.outer.position.set(0, y, 0);
-  top.inner.rotation.set(-.07 + Math.sin(t * 5.1) * wob * .3 + Math.sin(t * .7) * .015 * idle, yaw, .075 + Math.sin(t * 4.3) * wob * .4);
-  bot.outer.position.set(0, -y, 0);
+  const s = medallionState(t);
+  top.outer.position.set(0, s.y, 0);
+  top.inner.rotation.set(s.rx, s.yaw, s.rz);
+  bot.outer.position.set(0, -s.y, 0);
   bot.inner.rotation.copy(top.inner.rotation);
   top.outer.updateMatrixWorld(); bot.outer.updateMatrixWorld();
 
-  // ışık nabzı ve parıltı
-  const vis = dusk;
   const pulse = .85 + .15 * Math.sin(t * 2.4);
-  mirF.emissiveIntensity = (.6 + .9 * sm(seg(t, 3.0, 4.5))) * pulse;
-  mFaceB.emissiveIntensity = mirF.emissiveIntensity * .8;
-  mirB.emissiveIntensity = mFaceF.emissiveIntensity = .8;
-  orbLight.intensity = 2.2 * mirF.emissiveIntensity;
-  const facing = Math.pow(Math.max(0, Math.cos(yaw)), 1.5);       // küre kameraya bakmıyorsa parıltı söner
-  orbGlow.material.opacity = .9 * sm(seg(t, 2.6, 4.2)) * pulse * facing;
+  const facing = Math.pow(Math.max(0, Math.cos(s.yaw)), 1.5);       // küre kameraya bakmıyorsa ışığı söner
+  const glow = (1 + 6.5 * sm(seg(t, T_LAND - .4, T_LAND + 1.4))) * pulse;
+  mirF.emissiveIntensity = glow; mFaceB.emissiveIntensity = glow * .9;
+  mirB.emissiveIntensity = mFaceF.emissiveIntensity = 4 + land * 10;
+  orbLight.intensity = .5 * glow;
+  orbGlow.material.opacity = .25 * sm(seg(t, T_LAND - .3, T_LAND + 1.4)) * pulse * facing;
   orbGlow.scale.setScalar(.85 + .1 * Math.sin(t * 2.4));
-  keyTop.position.set(-3 + Math.sin(t * .5) * 2.5, 5, 6);   // yüzeyde gezen parlama
+  keyTop.position.set(-4 + Math.sin(t * .45) * 3.5, 5, 6);   // stüdyo ışığı yüzeyde gezer: parlama madalyonun üstünden akar
+  backTop.intensity = 3.2 * dawn; rimBot.intensity = 4.2 * dusk;
   stars.material.uniforms.uFade.value = sm(seg(t, 1.2, 3.4)); stars.material.uniforms.uTime.value = t;
   motes.material.uniforms.uFade.value = .4 * sm(seg(t, 1.6, 3.6)); motes.material.uniforms.uTime.value = t; motes.material.uniforms.uRise.value = t;
-  mirrorMat.uniforms.uMed.value.set(0, 0, 0); mirrorMat.uniforms.uPool.value = sm(seg(t, 2.6, 4)) * (.8 + land * .8);
+  mirrorMat.uniforms.uPool.value = clamp(1.6 - s.y, 0, 1) * .7 + land * .8;   // madalyon aynaya yaklaştıkça altı aydınlanır
 
-  // kamera: yavaş yaklaşma ve hafif yörünge (ufuk hep tam ortada)
+  // kamera: yavaş dolly + yörünge, inişte çok hafif sarsıntı; bakış hep yatay, ufuk hep tam ortada
   const k = eInOut(seg(t, 0, DUR));
   const fit = Math.max(1, 1.15 / camera.aspect);
-  const dist = lerp(10.6, 9.0, k) * fit;
-  const cx = lerp(1.1, -.7, k);
-  camera.position.set(cx, CAM_Y, dist);
-  camera.lookAt(cx * .25, CAM_Y, 0);
+  const dist = lerp(11.2, 9.2, k) * fit;
+  const cx = lerp(1.3, -.8, k);
+  const lt = t - T_LAND, shake = lt > 0 ? .012 * Math.exp(-5 * lt) * Math.sin(lt * 38) : 0;
+  camera.position.set(cx, CAM_Y + shake, dist);
+  camera.lookAt(cx * .25, CAM_Y + shake, 0);
   camera.updateMatrixWorld();
 
-  tmp.set(0, y, 0).project(camera); bgMat.uniforms.uSun.value.set(tmp.x * .5 + .5, tmp.y * .5 + .5);
-  tmp.set(0, -y, 0).project(camera); bgMat.uniforms.uMoon.value.set(tmp.x * .5 + .5, tmp.y * .5 + .5);
+  tmp.set(0, s.y, 0).project(camera); bgMat.uniforms.uSun.value.set(tmp.x * .5 + .5, tmp.y * .5 + .5);
+  tmp.set(0, -s.y, 0).project(camera); bgMat.uniforms.uMoon.value.set(tmp.x * .5 + .5, tmp.y * .5 + .5);
+  return { line, land };
+}
 
-  // yazılar
-  const c1 = eOut(seg(t, 8.7, 9.9)), c2 = eOut(seg(t, 9.1, 10.3));
-  $t.style.opacity = c1; $t.style.transform = `translateY(${(1 - c1) * -14}px)`; $t.style.filter = `blur(${(1 - c1) * 6}px)`;
-  $b.style.opacity = c2; $b.style.transform = `translateY(${(1 - c2) * 14}px)`; $b.style.filter = `blur(${(1 - c2) * 6}px)`;
-
-  // çizim: arka plan → karanlık dünya → ayna → aydınlık dünya
+function drawSubframe() {
+  renderer.setRenderTarget(rtScene);
   renderer.clear();
   renderer.clippingPlanes = [];
   renderer.render(bgScene, bgCam);
@@ -537,6 +603,35 @@ function renderAt(t) {
   renderer.clippingPlanes = clipBot; renderer.render(sceneBot, camera);
   renderer.clippingPlanes = []; renderer.render(sceneMirror, camera);
   renderer.clippingPlanes = clipTop; renderer.render(sceneTop, camera);
+  renderer.clippingPlanes = [];
+  bloom.render(renderer, null, rtScene, 0, false);
+}
+
+const halton = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; };
+const FPS = 60, SHUTTER = .5;            // 180° obtüratör
+let SUB = RENDER ? +(Q.get('sub') || 8) : 1;
+
+function renderAt(t) {
+  renderer.setRenderTarget(rtAcc); renderer.setClearColor(0x000000, 0); renderer.clear();
+  for (let i = 0; i < SUB; i++) {
+    const ts = SUB > 1 ? t + ((i + .5) / SUB - .5) * SHUTTER / FPS : t;
+    updateScene(Math.max(0, ts));
+    if (SUB > 1) camera.setViewOffset(W, H, halton(i + 1, 2) - .5, halton(i + 1, 3) - .5, W, H);
+    drawSubframe();
+    camera.clearViewOffset();
+    renderer.setRenderTarget(rtAcc);
+    accQuad.material.uniforms.tSrc.value = rtScene.texture; accQuad.material.uniforms.uW.value = 1 / SUB;
+    accQuad.render(renderer);
+  }
+  const { line, land } = updateScene(t);
+  renderer.setRenderTarget(null);
+  finalQuad.material.uniforms.tAcc.value = rtAcc.texture; finalQuad.material.uniforms.uTime.value = t;
+  finalQuad.render(renderer);
+
+  $h.style.transform = `scaleX(${line})`; $h.style.opacity = Math.min(1, line * 1.4) * (.6 + .4 * land);
+  const c1 = eOut(seg(t, 8.7, 9.9)), c2 = eOut(seg(t, 9.1, 10.3));
+  $t.style.opacity = c1; $t.style.transform = `translateY(${(1 - c1) * -14}px)`; $t.style.filter = `blur(${(1 - c1) * 6}px)`;
+  $b.style.opacity = c2; $b.style.transform = `translateY(${(1 - c2) * 14}px)`; $b.style.filter = `blur(${(1 - c2) * 6}px)`;
 }
 
 window.DURATION = DUR;
