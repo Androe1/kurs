@@ -1,0 +1,13 @@
+{
+  "name": "madalyonun-iki-yuzu",
+  "private": true,
+  "description": "Bir madalyonun iki yüzü: 3B madalyon animasyonu (Three.js) ve MP4 çıktısı",
+  "scripts": {
+    "build": "python3 build.py node_modules/@fontsource/cinzel/files",
+    "render": "node render.js --pr 1.5"
+  },
+  "dependencies": {
+    "three": "0.160.0",
+    "@fontsource/cinzel": "5.0.8"
+  }
+}
